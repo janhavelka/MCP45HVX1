@@ -67,6 +67,7 @@
 4. V+ voltage is dependent on V−; max delta is 36V; DGND can be anywhere between V+ and V−; VL must be ≥ DGND and ≤ V+.
 5. Minimum value: 36V − 1.8V = 34.2V.
 16. For specified analog performance, V+ must be ≥ 20V unless otherwise noted.
+18. During power-up, to ensure expected analog POR operation, the two power systems should have a common reference so that the driven DGND voltage is **not at a higher potential** than the driven V+ voltage. [Source: DS20005304B, p. 15]
 
 ### 2.2 Power-Up / BOR / POR Voltage Thresholds
 
@@ -325,6 +326,43 @@
 | 100 kΩ | 7-bit | −0.25 | +0.25 | LSb | IW = 300 µA; 36V (Note 2) |
 | 100 kΩ | 7-bit | −0.25 | +0.25 | LSb | IW = 170 µA; 20V (Note 2) |
 | 100 kΩ | 7-bit | −0.25 | +0.25 | LSb | IW = 83 µA; 10V |
+
+---
+
+## 6.3 Terminal Resistance Network Capacitance
+
+[Source: DS20005304B, p. 13]
+
+> Standard Operating Conditions: TA = −40°C to +125°C; VL = 2.7V to 5.5V.
+
+| Parameter | Symbol | Typ | Units | Conditions |
+|---|---|---|---|---|
+| Capacitance, Terminal A (P0A) | CA | 75 | pF | Measured to V−; f = 1 MHz; Wiper code = mid scale |
+| Capacitance, Wiper (P0W) | CW | 120 | pF | Measured to V−; f = 1 MHz; Wiper code = mid scale |
+| Capacitance, Terminal B (P0B) | CB | 75 | pF | Measured to V−; f = 1 MHz; Wiper code = mid scale |
+| Common-Mode Leakage | ICM | 5 | nA | VA = VB = VW |
+| Digital I/O Pin Capacitance (input/output) | CIN, COUT | 10 | pF | fC = 400 kHz |
+
+> No Max values are stated in the source for CA, CW, CB or ICM. CIN/COUT are given as typical only. [Source: DS20005304B, p. 13]
+
+---
+
+## 6.4 Digital I/O Specifications — SDA, SCL, A0, A1, SHDN, WLAT
+
+[Source: DS20005304B, p. 13]
+
+> Applies to all digital input/output pins: SDA, SCL, A0, A1, SHDN, WLAT.
+
+| Parameter | Symbol | Min | Max | Units | Conditions |
+|---|---|---|---|---|---|
+| Schmitt Trigger High-Input Threshold | VIH | 0.7 × VL | VL + 0.3 | V | 1.8 V ≤ VL ≤ 5.5 V |
+| Schmitt Trigger Low-Input Threshold | VIL | DGND − 0.5 | 0.3 × VL | V | — |
+| Hysteresis of Schmitt Trigger Inputs | VHYS | 0.1 × VL | — | V | — |
+| Output Low Voltage (SDA only) | VOL | DGND | 0.2 × VL | V | VL = 5.5 V; IOL = 5 mA |
+| Output Low Voltage (SDA only) | VOL | DGND | 0.2 × VL | V | VL = 1.8 V; IOL = 800 µA |
+| Input Leakage Current | IIL | −1 | +1 | µA | VIN = VL and VIN = DGND |
+
+> SDA is the only digital output pin. All other digital signals (SCL, A0, A1, SHDN, WLAT) are input-only. The 0.2 × VL formula means VOL scales with VL; at VL = 5.5 V this gives 1.1 V max VOL (at 5 mA), at VL = 1.8 V this gives 0.36 V max VOL (at 800 µA). [Source: DS20005304B, p. 13]
 
 ---
 

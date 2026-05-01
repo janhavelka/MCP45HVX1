@@ -152,16 +152,24 @@ This state is described in the application note Section 8.1 as useful for "disco
 
 ### Timing constraint
 
-The WLAT pin must be stable relative to the Acknowledge (ACK) rising edge:
+> ⚠ **WLAT Hold Time Conflict within DS20005304B:**
+>
+> - **TABLE 1-2, Specification 95 (p. 17):** TWLHD (WLAT hold time after SCL rising edge) = **250 ns min** (no max given; VL = 2.7–5.5 V, TA = −40°C to +125°C)
+> - **Note 9 (p. 17 and p. 20):** "A WLAT transition between 10 ns before and **200 ns** after the rising edge of SCL is indeterminate."
+>
+> A transition at 225 ns would pass Note 9's indeterminate window but fail TABLE 1-2's 250 ns minimum hold. These are internally inconsistent. Use **250 ns min** (the TABLE 1-2 specification) as the conservative safe margin.
+>
+> [Conflict: DS20005304B, TABLE 1-2 Spec 95, p. 17 (250 ns min) vs. Note 9, p. 17 (200 ns boundary)]
 
-| Parameter | Symbol | Min | Max | Unit |
-|---|---|---|---|---|
-| WLAT setup before ACK rising edge | t_WLAT_SU | 10 | — | ns |
-| WLAT hold after ACK rising edge | t_WLAT_HLD | — | 200 | ns |
+| Parameter | Symbol | Min | Max | Unit | Source |
+|---|---|---|---|---|---|
+| WLAT setup before SCL rising edge | TWLSU | 10 | — | ns | DS20005304B, TABLE 1-2, p. 17 |
+| WLAT hold after SCL rising edge | TWLHD | **250** | — | ns | DS20005304B, TABLE 1-2 Spec 95, p. 17 |
+| Indeterminate transition window | — | −10 | +200 | ns (relative to SCL↑) | DS20005304B, Note 9, p. 17 |
 
-If WLAT transitions within the window from 10 ns before to 200 ns after the ACK rising edge, the behavior is **indeterminate**. [Source: DS20005304B, p. 27]
+If WLAT transitions within the Note 9 window (−10 ns to +200 ns relative to SCL↑), the behavior is **indeterminate**. TABLE 1-2 additionally requires WLAT to be held stable for 250 ns minimum after SCL↑.
 
-> See `03_electrical_and_timing.md` TABLE 1-2 for exact WLAT timing parameters with full conditions.
+> See `03_electrical_and_timing.md` TABLE 1-2 for full WLAT timing parameters with complete conditions.
 
 ### Use case
 

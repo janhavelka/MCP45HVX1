@@ -62,45 +62,80 @@ The VL supply powers the I²C digital logic. [Source: DS20005304B, p. 48]
 
 The MCP45HVX1 generates A/Ā bits (as client/slave). The host generates the final Ā at the end of a read sequence. [Source: DS20005304B, p. 61]
 
+### TABLE 6-1: MCP45HVX1 A/Ā Responses
+
+[Source: DS20005304B, p. 49]
+
+| Event | Response | Comment |
+|---|---|---|
+| General Call address received | A | Only if GCEN bit is set |
+| Client address valid | A | — |
+| Client address not valid | Ā | — |
+| AD3:AD0 + C1:C0 form an invalid combination | Ā | After device has received address and command byte |
+| Bus Collision | N.A. | I²C module resets, or "don't care" if the collision occurs on the host's Start bit |
+
+### Stop bit behavior
+
+A Stop bit resets the I²C interface of **all** MCP45HVX1 devices on the bus. [Source: DS20005304B, p. 50, Section 6.2.1.5]
+
+### Clock stretching
+
+The MCP45HVX1 does **not** stretch the SCL signal (clock stretching). Memory read access occurs fast enough that no stretching is needed. [Source: DS20005304B, p. 50, Section 6.2.2]
+
+### SDA slope control
+
+The MCP45HVX1 implements slope control on the SDA output. As the device transitions from HS mode to Fast/Standard (F/S) mode, the slope control parameter changes from the HS specification to the FS specification. For Fast (FS) and High-Speed (HS) modes, the device has a spike suppression circuit and a Schmitt trigger on SDA and SCL inputs. [Source: DS20005304B, p. 52, Sections 6.2.5, 6.2.6.1]
+
 ---
 
 ## 3. Device Addressing
 
 ### 7-bit address format
 
+> ⚠ **INTRA-DOCUMENT ADDRESS CONFLICT:** Two contradictory I²C address specifications exist within the same revision of DS20005304B and cannot be reconciled from the document alone.
+
+**Version A — TABLE 6-2 and Section 6.2.4 (p. 51):**
+
+- Section 6.2.4 text: "The A6:A2 address bits are fixed to `'01111'`"
+- Figure 6-9 labels the five fixed bits as: `0 1 1 1 1`
+- TABLE 6-2 entry: MCP45HVX1 = `'0111 1'b + A1:A0`
+- Resulting 7-bit address range: `0111 1 A1 A0` = **0x3C–0x3F**
+
 ```
-Bit:  7    6    5    4    3    2    1    0
-      1    0    1    1    1    A1   A0   R/W
-      [Fixed = 0b1011 1]   [Var]   [R/W]
+Bit:  A6   A5   A4   A3   A2   A1   A0
+       0    1    1    1    1    A1   A0
+       [Fixed = '01111']      [Var]
 ```
 
-The fixed portion is `1011 1` (binary) — i.e., the upper 5 bits are `10111`.  
-A1 and A0 correspond to the physical address pins (see `02_pinout_and_signals.md`).  
+**Version B — All Command Transaction Figures (Figures 7-2 through 7-8, pp. 59–64):**
+
+- The control byte in every command figure is drawn as: `S | 1 0 1 1 1 A1 A0 | R/W | A`
+- Fixed bits = `10111`
+- Resulting 7-bit address range: `1011 1 A1 A0` = **0x5C–0x5F**
+
+```
+Bit:  A6   A5   A4   A3   A2   A1   A0
+       1    0    1    1    1    A1   A0
+       [Fixed = '10111']      [Var]
+```
+
+TABLE 6-2 Note 1 states the MCP45HVX1 address is "different than the MCP44XX/MCP45XX/MCP46XX family (`'0101 11'`, `'0101 1'`, or `'0101'`)". Both `01111` and `10111` are distinct from those families.
+
+[Conflict: DS20005304B, TABLE 6-2 and Section 6.2.4, p. 51 vs. Figures 7-2–7-8, pp. 59–64]
+
+> **An implementation agent must verify the actual I²C address against real hardware or by contacting Microchip Technology before committing to either address.**
+
+### Address pin assignments
+
+A1 and A0 are hardware address pins (see `02_pinout_and_signals.md`). Up to 4 devices may share one I²C bus (A1:A0 = 00, 01, 10, 11).
+
 R/W = 0 for Write, R/W = 1 for Read.
-
-Up to 4 devices may share one I²C bus (A1:A0 = 00, 01, 10, 11).
-
-**Note:** The fixed address bits differ from the MCP44XX/MCP45XX/MCP46XX family which uses `0101 1x`. The MCP45HVX1 uses `1011 1`.  
-[Source: DS20005304B, p. 51]
 
 10-bit addressing is **not supported**. [Source: DS20005304B, p. 51]
 
-### Control byte (I²C address byte)
+### Multi-host support
 
-In the datasheet figures, the control byte is shown as:
-
-```
-S | 1 0 1 1 | 1 A1 A0 | R/W | A
-```
-
-where:
-- `1011` = fixed address bits [7:4]
-- `1 A1 A0` = fixed `1` plus two address-pin bits [3:2:1]  
-  *(Note: bit 3 of the 7-bit I2C address is always 1)*
-- `R/W` = direction bit (0 = host writes; 1 = host reads)
-- `A` = Acknowledge from MCP45HVX1
-
-[Source: DS20005304B, p. 51, p. 59, p. 61]
+Multi-host I²C configurations are supported; the device's I²C arbitration and bus-collision behavior are described in Section 6.2.4 of the datasheet. [Source: DS20005304B, p. 1 (feature list)]
 
 ---
 
@@ -146,44 +181,71 @@ A **GCEN (General Call Enable)** bit controls whether the device responds to the
 
 [Source: DS20005304B, p. 53–54]
 
-### GC command formats
+### GC command formats (Figure 6-11)
 
-Two GC command frame sizes are defined:
+Three General Call frame formats are defined. [Source: DS20005304B, p. 54]
 
-#### 3-byte GC format (Write Wiper or Write TCON)
+#### Format 1 — Standard 2-byte General Call (INC/DEC Wiper)
 
 ```
-Byte 1: S | 0000 0000 | A          ← General Call address
-Byte 2: GC Control byte            ← Defines operation
-Byte 3: Data byte                  ← 8-bit data
+Byte 1: S | 0000 0000 | A          ← General Call address (0x00)
+Byte 2: GC Command byte            ← 7-bit command + appended '0' = 8-bit
         P
 ```
 
-Valid GC Control byte values for 3-byte format:
+Valid GC Command byte values (7-bit command, second byte LSB = 0):
 
-| GC Control Byte (binary) | Operation |
+| 7-bit Command (Notes 1–3) | Operation |
 |---|---|
-| `1000 00x` | Write Wiper 0 (x = don't care) |
-| `1100 00x` | Write TCON Register (x = don't care) |
+| `'1000 010'b` or `'1000 011'b` | Increment Wiper 0 Register |
+| `'1000 100'b` or `'1000 101'b` | Decrement Wiper 0 Register |
 
-[Source: DS20005304B, p. 53–54]
-
-#### 2-byte GC format (Increment or Decrement Wiper)
+#### Format 2 — Microchip Extension 3-byte General Call (Write Wiper or Write TCON)
 
 ```
-Byte 1: S | 0000 0000 | A          ← General Call address
-Byte 2: GC Control byte            ← Defines operation
+Byte 1: S | 0000 0000 | A          ← General Call address (0x00)
+Byte 2: GC Command byte (LSB=0)    ← 7-bit command + appended '0' = 8-bit
+Byte 3: Data byte                  ← 8-bit data to write
         P
 ```
 
-Valid GC Control byte values for 2-byte format:
+Valid GC Command byte values (7-bit command, second byte LSB = 0):
 
-| GC Control Byte (binary) | Operation |
+| 7-bit Command (Notes 1–3) | Operation |
 |---|---|
-| `1000 01x` | Increment Wiper 0 |
-| `1000 10x` | Decrement Wiper 0 |
+| `'1000 000'b` or `'1000 001'b` | Write next byte (third byte) to volatile Wiper 0 register |
+| `'1100 000'b` or `'1100 001'b` | Write next byte (third byte) to TCON Register |
 
-[Source: DS20005304B, p. 53–54]
+#### Format 3 — Hardware General Call
+
+```
+Byte 1: S | 0000 0000 | A          ← General Call address (0x00)
+Byte 2: GC Command byte (LSB=1)    ← Second byte has LSB = 1 → "Hardware General Call"
+Byte 3..n: Any bytes               ← MCP45HVX1 ignores all; NACKs
+        P
+```
+
+When the second byte LSB = 1, this signals a **Hardware General Call**. The MCP45HVX1 ignores all subsequent bytes (NACKs each) and waits until the Stop bit (P) is encountered. This format is defined by the I²C specification for hardware address programming and is **not applicable** to MCP45HVX1. [Source: DS20005304B, p. 54, Figure 6-11]
+
+### TABLE 6-3: General Call Commands
+
+[Source: DS20005304B, p. 53]
+
+> Note: Only one General Call command is executed per issue of the General Call control byte. Any additional General Call commands are **ignored and Not Acknowledged**.
+
+| 7-bit Command | Comment |
+|---|---|
+| `'1000 000'b` or `'1000 001'b` | Write next byte (third byte) to volatile Wiper 0 register |
+| `'1100 000'b` or `'1100 001'b` | Write next byte (third byte) to TCON Register |
+| `'1000 010'b` or `'1000 011'b` | Increment Wiper 0 Register |
+| `'1000 100'b` or `'1000 101'b` | Decrement Wiper 0 Register |
+| Any other code | **Not Acknowledged** |
+
+**Note 1:** Any other code is Not Acknowledged. These codes may be used by other devices on the I²C bus.  
+**Note 2:** The 7-bit command always appends a `'0'` to form 8 bits (second byte LSB = 0 for Formats 1 and 2).  
+**Note 3:** Three I²C-specification-reserved commands (`'0000 011'b`, `'0000 010'b`, `'0000 000'b`) are **not** Acknowledged by the MCP45HVX1.
+
+[Source: DS20005304B, p. 53]
 
 ### GC constraints
 
@@ -505,6 +567,8 @@ The wiper value transitions after each command Acknowledge when accessing volati
 | Increment Wiper | 20 | 9n + 11 | |
 | Decrement Wiper | 20 | 9n + 11 | |
 
+> **Note 2:** These bit-clock counts apply to **Standard mode and Fast mode only**. The HS (High-Speed) mode bit-clock counts are not tabulated in TABLE 7-3. [Source: DS20005304B, p. 58]
+
 ---
 
 ## 15. WLAT Pin Interaction with Commands
@@ -512,6 +576,14 @@ The wiper value transitions after each command Acknowledge when accessing volati
 The WLAT (Wiper Latch) pin inhibits wiper updates when High. When Low, wiper updates proceed normally. The WLAT pin affects when the physical wiper moves, not when data is written to the register.
 
 - If WLAT = High during a Write/INC/DEC: the command is received and Acknowledged, but the wiper position does **not** change until WLAT goes Low.
-- WLAT transition timing: the WLAT signal must be stable for at least **10 ns before** or **200 ns after** the ACK rising edge. Transitions within this window produce indeterminate behavior. [Source: DS20005304B, p. 27, p. 50]
+
+> ⚠ **WLAT Hold Time Conflict within DS20005304B:**
+>
+> - **TABLE 1-2, Specification 95 (p. 17):** TWLHD (WLAT hold time after SCL rising edge) = **250 ns min** (no max given; tested at VL = 2.7–5.5 V, TA = −40°C to +125°C)
+> - **Note 9 (TABLE 1-2, p. 17; TABLE 2-1, p. 20):** "A WLAT transition between 10 ns before and **200 ns** after the rising edge of SCL is indeterminate."
+>
+> The 250 ns minimum hold requirement (TABLE 1-2, Spec 95) is violated by any WLAT transition occurring between 200 ns and 250 ns after the SCL rising edge. However, Note 9 describes the 10 ns before / 200 ns after window as "indeterminate," which also covers the full 0–200 ns region. These two constraints are internally inconsistent: a transition at 225 ns would be outside the Note 9 indeterminate window yet inside the TABLE 1-2 minimum hold time.
+>
+> **Safe implementation rule (both constraints observed):** WLAT must be stable at least **250 ns after** the SCL rising edge before any transition. [Conflict: DS20005304B, TABLE 1-2 Spec 95, p. 17 (250 ns min) vs. Note 9, p. 17 (200 ns boundary)]
 
 > See also `06_modes_interrupts_status_and_faults.md` § WLAT for full timing table.

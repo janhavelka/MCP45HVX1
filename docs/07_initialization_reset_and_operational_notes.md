@@ -53,11 +53,30 @@ BOR occurs when VL drops below the BOR threshold. BOR causes the same register i
 
 [Source: DS20005304B, p. 28, p. 35–36]
 
-> **Gap:** The exact POR and BOR threshold voltages for VL are not specified in the extracted pages of DS20005304B. See `08_variant_differences_and_open_questions.md`.
+> **Note:** The exact POR and BOR threshold voltages for VL are specified in `03_electrical_and_timing.md`, Section 2.2: VPOR (VL POR rising threshold) = 1.8 V typ, VDBOR (VL BOR threshold) = 1.55 V typ (all typical values; explicit Min/Max not stated). [Source: DS20005304B, p. 13]
 
 ---
 
 ## 3. Power-Up Sequence Requirements
+
+### Device Functionality at Each VL Operating Region
+
+TABLE 4-5 defines device behavior across distinct VL voltage regions. [Source: DS20005304B, p. 31]
+
+| VL Condition | V+/V− State | Serial Interface | Pot Terminals | Wiper Register | Output |
+|---|---|---|---|---|---|
+| VL < VDBOR (< 1.8 V typ) | Valid | Ignored | Unknown | Unknown | Invalid |
+| VL < VDBOR (< 1.8 V typ) | Invalid | Ignored | Unknown | Unknown | Invalid |
+| VDBOR ≤ VL < 1.8 V | Valid | Unknown | Connected | Initialized | Valid |
+| VDBOR ≤ VL < 1.8 V | Invalid | Unknown | Connected | Invalid | — |
+| 1.8 V ≤ VL ≤ 5.5 V | Valid | Accepted | Connected | Register controls | Valid |
+| 1.8 V ≤ VL ≤ 5.5 V | Invalid | Accepted | Connected | Invalid | — |
+
+> **Note 1 (TABLE 4-5):** It is recommended to use a voltage supervisor device to hold the system in a Reset state for voltages below the minimum operating voltage.  
+> **Note 2 (TABLE 4-5):** Assumes V+ > VAPOR.  
+> [Source: DS20005304B, p. 31]
+
+---
 
 ### VL relative to V−
 
@@ -163,10 +182,15 @@ If WLAT is used for synchronous wiper updates:
 - After power-up, ensure WLAT is Low before issuing wiper commands, unless intentional latching is desired.
 - During operation: update wipers with WLAT High, then release WLAT Low to apply all changes simultaneously.
 
-WLAT timing constraint (relative to ACK rising edge):
-- Must be stable ≥ 10 ns before ACK rising edge
-- Must be stable ≥ 200 ns after ACK rising edge
-- Transition within this window: **indeterminate** behavior
+WLAT timing constraint (relative to SCL rising edge):
+
+> ⚠ **Conflict:** TABLE 1-2 spec 95 specifies **250 ns minimum** hold time (TWLHD); Note 9 describes the indeterminate window as 10 ns before to **200 ns** after. A safe implementation must use 250 ns. [Conflict: DS20005304B, TABLE 1-2 Spec 95, p. 17 vs. Note 9, p. 17]
+
+| Parameter | Symbol | Value | Unit |
+|---|---|---|---|
+| WLAT setup before SCL rising edge | TWLSU | ≥ 10 ns min | ns |
+| WLAT hold after SCL rising edge | TWLHD | ≥ 250 ns min | ns (TABLE 1-2) |
+| Indeterminate transition window | — | −10 to +200 ns | ns relative to SCL↑ (Note 9) |
 
 [Source: DS20005304B, p. 27]
 

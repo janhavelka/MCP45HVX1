@@ -153,7 +153,7 @@ The following device families are referenced in the datasheet as related product
 
 | Family | Interface | Fixed I²C Address Bits | Note |
 |---|---|---|---|
-| MCP45HVX1 (this device) | I²C | `10111` (5 MSbs) | — |
+| MCP45HVX1 (this device) | I²C | ⚠ CONFLICT: `01111` per TABLE 6-2 (p. 51) OR `10111` per Figures 7-2–7-8 (pp. 59–64) | See Section 7.4 for details |
 | MCP41HVX1 | SPI | N/A | SPI variant; separate DS20005207 |
 | MCP44XX / MCP45XX / MCP46XX | I²C | `01011` (5 MSbs) | Different address; command format compatible |
 
@@ -167,43 +167,39 @@ The MCP45HVX1 maintains **command byte compatibility** with the MCP44XX/MCP45XX/
 
 The following information was **not found** in the available pages of DS20005304B, and the supplemental PDFs were inaccessible:
 
-### 6.1 POR/BOR Threshold Voltages
-
-The exact VL voltage at which POR and BOR are triggered is **not stated** in the extracted pages. Critical for designing power sequencing. [Source: Not found in DS20005304B]
-
-### 6.2 POR Completion Time (tPOR)
+### 6.1 POR Completion Time (tPOR)
 
 No tPOR (time from VL reaching POR threshold to device ready for I²C) is stated. May be in unread application notes. [Source: Not found]
 
-### 6.3 GCEN Bit Location
+### 6.2 GCEN Bit Location
 
 The GCEN (General Call Enable) bit is referenced in the General Call section (p. 53–55) but its register address, bit number, reset value, and access type are not clearly identified in the extracted text. The description implies it exists within the device configuration, but no register definition was found. [Source: DS20005304B, p. 53–55 — referenced but not located]
 
-### 6.4 D8 Bit Definition
+### 6.3 D8 Bit Definition
 
 The command byte D8 bit is described as "currently only one of the data bits is defined (D8)" [Source: DS20005304B, p. 56] but no further specification of what D8 does (or doesn't do) is provided in the available text.
 
-### 6.5 V− Bypass Capacitor Recommendation
+### 6.4 V− Bypass Capacitor Recommendation
 
 Figure 8-13 shows bypass capacitors on VL and V+ but the V− bypass capacitor recommendation is not explicitly stated in the extracted text. [Source: DS20005304B, p. 73 — implicit from figure]
 
-### 6.6 SCL/SDA Pull-up Resistor Values
+### 6.5 SCL/SDA Pull-up Resistor Values
 
 Recommended pull-up resistor values for SCL and SDA are not stated in the extracted pages. Standard I²C pull-up sizing depends on bus capacitance and speed, but no specific recommendation appears in the datasheet text. [Source: Not found in DS20005304B]
 
-### 6.7 Wiper Resistance (RW) at Partial Voltages
+### 6.6 Wiper Resistance (RW) at Partial Voltages
 
 Wiper resistance specifications (RWB/RWA) are defined for specific bias conditions. Behavior at intermediate V+/V− voltages is not tabulated. [Source: DS20005304B, p. 15–17 — only specific conditions given]
 
-### 6.8 Automotive Variant Specifications
+### 6.7 Automotive Variant Specifications
 
 Differences between standard (E-grade) and automotive variants are referenced in the product identification section but not fully detailed in the extracted pages. [Source: DS20005304B, p. 96–102]
 
-### 6.9 Errata
+### 6.8 Errata
 
 The `errata.pdf` file in `docs/` is inaccessible. Known errata may exist for the MCP45HVX1. [Source: errata.pdf — unread]
 
-### 6.10 Startup Analog Rail Behavior During POR
+### 6.9 Startup Analog Rail Behavior During POR
 
 What happens to P0W, P0A, P0B terminals during VL power-up before POR completes is not described. Terminal behavior during analog supply ramp is unspecified. [Source: Not found]
 
@@ -243,6 +239,21 @@ This appears to be a maximum count value (beyond the last physical tap), but wip
 The clamping behavior table (TABLE 7-4) correctly shows the maximum wiper code as FFh (8-bit) and 7Fh (7-bit), with those being the values where INC no longer operates. This is consistent. The "100h / 80h" language in Section 7.6 prose appears to refer to the number of resistors+1, not a writable register value.
 
 [Ambiguity: DS20005304B, Section 7.6, p. 63 — "100h/80h" language not directly contradicted but potentially confusing]
+
+### 7.4 I²C Device Address — Intra-Document Conflict (CRITICAL)
+
+Two contradictory I²C fixed-address specifications appear within the **same revision** of DS20005304B and cannot be reconciled without external verification:
+
+| Source | Fixed Address Bits (A6:A2) | 7-bit Address Range |
+|---|---|---|
+| TABLE 6-2 and Section 6.2.4 (p. 51) | `01111` | 0x3C–0x3F |
+| Figures 7-2 through 7-8 (pp. 59–64) | `10111` | 0x5C–0x5F |
+
+The TABLE 6-2 Note 1 that the address "differs from MCP44XX/MCP45XX/MCP46XX" does not resolve the conflict; both candidates differ from the MCP45XX `0x2E–0x2F` range.
+
+[Conflict: DS20005304B, TABLE 6-2 / Section 6.2.4, p. 51 vs. Figures 7-2–7-8, pp. 59–64]
+
+**This is the highest-priority open question for any implementation. Address must be verified against hardware.**
 
 ---
 
@@ -296,7 +307,8 @@ The following are items that a driver/library implementation would typically nee
 
 | Item | Status | Notes |
 |---|---|---|
-| POR/BOR threshold for VL | **Missing** | Not found in extracted pages |
+| **I²C device address** | **CONFLICT** | TABLE 6-2 says 0x3C–0x3F; Figures 7-2–7-8 say 0x5C–0x5F — must verify on hardware |
+| POR/BOR threshold for VL | **Documented (typical only)** | VPOR = 1.8 V typ, VDBOR = 1.55 V typ — in file 03 Section 2.2; no Min/Max given |
 | POR completion time (tPOR) | **Missing** | Device ready time after power-up unknown |
 | SCL/SDA pull-up recommendations | **Missing** | No specific values given |
 | GCEN bit register location | **Unclear** | Referenced but not located in register map |
