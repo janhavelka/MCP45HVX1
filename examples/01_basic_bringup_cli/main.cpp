@@ -25,6 +25,7 @@ MCP45HVX1::MCP45HVX1 gDev;
 MCP45HVX1::Config gConfig;
 transport::BusResetContext gBusReset{board::I2C_SDA, board::I2C_SCL};
 bool gVerbose = false;
+bool gGeneralCallArmed = false;
 
 const char* skipWs(const char* p) {
   while (p != nullptr && (*p == ' ' || *p == '\t')) {
@@ -35,6 +36,14 @@ const char* skipWs(const char* p) {
 
 bool noMoreArgs(const char* p) {
   return *skipWs(p) == '\0';
+}
+
+bool requireNoArgs(const char* command, const char* args) {
+  if (noMoreArgs(args)) {
+    return true;
+  }
+  LOGE("usage: %s", command);
+  return false;
 }
 
 bool readToken(const char*& p, char* out, size_t outLen) {
@@ -76,7 +85,7 @@ bool parseFloat01(const char*& p, float& out) {
   }
   char* end = nullptr;
   const float parsed = strtof(p, &end);
-  if (end == p || parsed < 0.0f || parsed > 1.0f) {
+  if (end == p || parsed != parsed || parsed < 0.0f || parsed > 1.0f) {
     return false;
   }
   p = end;
@@ -160,6 +169,8 @@ const char* modeName(MCP45HVX1::TerminalMode mode) {
       return "float";
     case MCP45HVX1::TerminalMode::Shutdown:
       return "shutdown";
+    case MCP45HVX1::TerminalMode::Custom:
+      return "custom";
     default:
       return "?";
   }
@@ -277,6 +288,8 @@ MCP45HVX1::Config makeDefaultConfig() {
   cfg.i2cWrite = transport::wireWrite;
   cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cUser = &Wire;
+  gBusReset.frequencyHz = board::I2C_FREQ_HZ;
+  gBusReset.timeoutMs = board::I2C_TIMEOUT_MS;
   cfg.busReset = transport::wireBusReset;
   cfg.controlUser = &gBusReset;
   cfg.i2cAddress = MCP45HVX1::cmd::DEFAULT_ADDRESS;
@@ -324,6 +337,7 @@ void printDeviceInfo() {
                     resistanceName(info.resistance),
                     static_cast<unsigned>(info.nominalResistanceOhms),
                     static_cast<double>(info.nominalStepOhms));
+  LOG_SERIAL.printf(" maxI=%.1f mA", static_cast<double>(info.maxTerminalCurrentMilliAmps));
   if (info.usingAlternateAddressRange) {
     LOG_SERIAL.print(" alternate-address");
   }
@@ -395,9 +409,9 @@ void printHelp() {
   cli::printHelpItem("rreg <0x00|0x04>", "Read one register");
   cli::printHelpItem("wreg <reg> <value>", "Write one register");
   cli::printHelpItem("wregs <reg> <value>", "Compatibility alias for wreg");
-  cli::printHelpItem("wiper <0..max>", "Write volatile wiper code");
-  cli::printHelpItem("frac <0.0..1.0>", "Write normalized wiper position");
-  cli::printHelpItem("pos <0.0..1.0>", "Alias for frac");
+  cli::printHelpItem("wiper [0..max]", "Read or write volatile wiper code");
+  cli::printHelpItem("frac [0.0..1.0]", "Read or write normalized wiper position");
+  cli::printHelpItem("pos [0.0..1.0]", "Alias for frac");
   cli::printHelpItem("zero | mid | max", "Move wiper to common positions");
   cli::printHelpItem("inc [n] | dec [n]", "Step wiper with clamp at endpoints");
 
@@ -405,18 +419,19 @@ void printHelp() {
   cli::printHelpItem("tcon [value]", "Read or write TCON");
   cli::printHelpItem("term a|w|b [0|1]", "Read or set one terminal bit");
   cli::printHelpItem("shutdown [0|1]", "Read or set software shutdown");
-  cli::printHelpItem("mode pot|bw|aw|float|shutdown", "Apply terminal preset");
+  cli::printHelpItem("mode [pot|bw|aw|float|shutdown]", "Read or apply terminal preset");
 
   cli::printHelpSection("Diagnostics");
   cli::printHelpItem("cfg | settings", "Print config, cache, and health");
   cli::printHelpItem("drv", "Print compact health line");
   cli::printHelpItem("info", "Print variant/resistance helper info");
   cli::printHelpItem("selftest", "Probe, read, and decode all practical state");
-  cli::printHelpItem("stress [n]", "Run inc/dec exercise");
-  cli::printHelpItem("stress_mix [n]", "Exercise writes, modes, and reads");
+  cli::printHelpItem("stress [n]", "Run inc/dec exercise and restore state");
+  cli::printHelpItem("stress_mix [n]", "Exercise writes/modes and restore state");
   cli::printHelpItem("verbose [0|1]", "Get/set verbose command logging");
 
   cli::printHelpSection("General Call");
+  cli::printHelpItem("gc arm | gc disarm", "Enable one broadcast command attempt");
   cli::printHelpItem("gc wiper <code>", "Broadcast wiper write");
   cli::printHelpItem("gc tcon <value>", "Broadcast TCON write");
   cli::printHelpItem("gc inc | gc dec", "Broadcast one wiper step");
@@ -424,19 +439,38 @@ void printHelp() {
 }
 
 void handleBegin(const char* args) {
-  uint32_t address = 0;
+  MCP45HVX1::Config next = gConfig;
   const char* p = args;
-  if (parseU32(p, 0x7F, address)) {
-    gConfig.i2cAddress = static_cast<uint8_t>(address);
+  char token[16] = {};
+  if (!readToken(p, token, sizeof(token))) {
+    beginDevice();
+    return;
   }
-  MCP45HVX1::Resolution resolution = gConfig.resolution;
+
+  const char* tokenPtr = token;
+  MCP45HVX1::Resolution resolution = next.resolution;
+  if (parseResolution(tokenPtr, resolution) && noMoreArgs(tokenPtr)) {
+    next.resolution = resolution;
+  } else {
+    tokenPtr = token;
+    uint32_t address = 0;
+    if (!parseU32(tokenPtr, 0x7F, address) || !noMoreArgs(tokenPtr) ||
+        (!isPrimaryAddress(static_cast<uint8_t>(address)) &&
+         !isAlternateAddress(static_cast<uint8_t>(address)))) {
+      LOGE("usage: begin [addr] [7|8]");
+      return;
+    }
+    next.i2cAddress = static_cast<uint8_t>(address);
+  }
+
   if (!noMoreArgs(p)) {
     if (!parseResolution(p, resolution) || !noMoreArgs(p)) {
       LOGE("usage: begin [addr] [7|8]");
       return;
     }
-    gConfig.resolution = resolution;
+    next.resolution = resolution;
   }
+  gConfig = next;
   beginDevice();
 }
 
@@ -482,6 +516,17 @@ void handleResistance(const char* args) {
 void handleWiper(const char* args) {
   uint32_t value = 0;
   const char* p = args;
+  if (noMoreArgs(p)) {
+    uint8_t code = 0;
+    MCP45HVX1::Status st = gDev.readWiper(code);
+    if (st.ok()) {
+      LOG_SERIAL.printf("wiper=0x%02X\n", code);
+    } else {
+      printStatus(st);
+    }
+    return;
+  }
+
   if (!parseU32(p, MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution), value) ||
       !noMoreArgs(p)) {
     LOGE("usage: wiper <0..%u>",
@@ -494,6 +539,16 @@ void handleWiper(const char* args) {
 void handleFraction(const char* args) {
   float fraction = 0.0f;
   const char* p = args;
+  if (noMoreArgs(p)) {
+    MCP45HVX1::Status st = gDev.readWiperFraction(fraction);
+    if (st.ok()) {
+      LOG_SERIAL.printf("frac=%.4f\n", static_cast<double>(fraction));
+    } else {
+      printStatus(st);
+    }
+    return;
+  }
+
   if (!parseFloat01(p, fraction) || !noMoreArgs(p)) {
     LOGE("usage: frac <0.0..1.0>");
     return;
@@ -587,6 +642,16 @@ void handleShutdown(const char* args) {
 void handleMode(const char* args) {
   MCP45HVX1::TerminalMode mode = MCP45HVX1::TerminalMode::Potentiometer;
   const char* p = args;
+  if (noMoreArgs(p)) {
+    MCP45HVX1::Status st = gDev.getTerminalMode(mode);
+    if (st.ok()) {
+      LOG_SERIAL.printf("mode=%s\n", modeName(mode));
+    } else {
+      printStatus(st);
+    }
+    return;
+  }
+
   if (!parseMode(p, mode) || !noMoreArgs(p)) {
     LOGE("usage: mode pot|bw|aw|float|shutdown");
     return;
@@ -650,32 +715,66 @@ void handleGeneralCall(const char* args) {
   const char* p = args;
   char sub[12] = {};
   if (!readToken(p, sub, sizeof(sub))) {
-    LOGE("usage: gc wiper <code> | gc tcon <value> | gc inc | gc dec");
+    LOGE("usage: gc arm | gc disarm | gc wiper <code> | gc tcon <value> | gc inc | gc dec");
+    gGeneralCallArmed = false;
     return;
   }
 
+  if (strcmp(sub, "arm") == 0) {
+    if (noMoreArgs(p)) {
+      gGeneralCallArmed = true;
+      LOGW("General Call armed for one broadcast command; it affects every enabled device");
+    } else {
+      LOGE("usage: gc arm");
+      gGeneralCallArmed = false;
+    }
+    return;
+  }
+  if (strcmp(sub, "disarm") == 0) {
+    gGeneralCallArmed = false;
+    if (noMoreArgs(p)) {
+      LOGI("General Call disarmed");
+    } else {
+      LOGE("usage: gc disarm");
+    }
+    return;
+  }
+  if (!gGeneralCallArmed) {
+    LOGE("General Call is broadcast; run 'gc arm' first");
+    return;
+  }
+
+  MCP45HVX1::Status st = MCP45HVX1::Status::Ok();
   if (strcmp(sub, "wiper") == 0) {
     uint32_t value = 0;
     if (!parseU32(p, MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution), value) ||
         !noMoreArgs(p)) {
       LOGE("usage: gc wiper <0..max>");
+      gGeneralCallArmed = false;
       return;
     }
-    printStatus(gDev.generalCallWriteWiper(static_cast<uint8_t>(value)));
+    st = gDev.generalCallWriteWiper(static_cast<uint8_t>(value));
   } else if (strcmp(sub, "tcon") == 0) {
     uint32_t value = 0;
     if (!parseU32(p, 0xFF, value) || !noMoreArgs(p)) {
       LOGE("usage: gc tcon <0x00..0xff>");
+      gGeneralCallArmed = false;
       return;
     }
-    printStatus(gDev.generalCallWriteTcon(static_cast<uint8_t>(value)));
+    st = gDev.generalCallWriteTcon(static_cast<uint8_t>(value));
   } else if (strcmp(sub, "inc") == 0 && noMoreArgs(p)) {
-    printStatus(gDev.generalCallIncrementWiper());
+    st = gDev.generalCallIncrementWiper();
   } else if (strcmp(sub, "dec") == 0 && noMoreArgs(p)) {
-    printStatus(gDev.generalCallDecrementWiper());
+    st = gDev.generalCallDecrementWiper();
   } else {
-    LOGE("usage: gc wiper <code> | gc tcon <value> | gc inc | gc dec");
+    LOGE("usage: gc arm | gc disarm | gc wiper <code> | gc tcon <value> | gc inc | gc dec");
+    gGeneralCallArmed = false;
+    return;
   }
+
+  gGeneralCallArmed = false;
+  printStatus(st);
+  LOGI("General Call disarmed");
 }
 
 void runSelfTest() {
@@ -683,6 +782,19 @@ void runSelfTest() {
   readRegisters();
   handleLast();
   health_view::printSummary(gDev);
+}
+
+void restoreSnapshot(const MCP45HVX1::RegisterSnapshot& snapshot) {
+  MCP45HVX1::Status st = gDev.writeWiper(snapshot.wiper);
+  if (!st.ok()) {
+    LOGW("restore wiper failed");
+    printStatus(st);
+  }
+  st = gDev.writeTcon(snapshot.tcon);
+  if (!st.ok()) {
+    LOGW("restore TCON failed");
+    printStatus(st);
+  }
 }
 
 void runStress(const char* args, bool mixed) {
@@ -697,13 +809,21 @@ void runStress(const char* args, bool mixed) {
     return;
   }
 
+  MCP45HVX1::RegisterSnapshot original;
+  MCP45HVX1::Status st = gDev.readSnapshot(original);
+  if (!st.ok()) {
+    printStatus(st);
+    return;
+  }
+
   for (uint32_t i = 0; i < count; ++i) {
-    MCP45HVX1::Status st = mixed ? gDev.writeWiper(static_cast<uint8_t>(
-                                      (i * MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution)) /
-                                      (count - 1U > 0U ? count - 1U : 1U)))
-                                  : gDev.incrementWiper();
+    st = mixed ? gDev.writeWiper(static_cast<uint8_t>(
+                       (i * MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution)) /
+                       (count - 1U > 0U ? count - 1U : 1U)))
+               : gDev.incrementWiper();
     if (!st.ok()) {
       printStatus(st);
+      restoreSnapshot(original);
       return;
     }
 
@@ -715,6 +835,7 @@ void runStress(const char* args, bool mixed) {
       st = gDev.setTerminalMode(mode);
       if (!st.ok()) {
         printStatus(st);
+        restoreSnapshot(original);
         return;
       }
     }
@@ -725,10 +846,13 @@ void runStress(const char* args, bool mixed) {
       MCP45HVX1::Status st = gDev.decrementWiper();
       if (!st.ok()) {
         printStatus(st);
+        restoreSnapshot(original);
         return;
       }
     }
   }
+
+  restoreSnapshot(original);
   readRegisters();
 }
 
@@ -742,11 +866,11 @@ void handleCommand(String line) {
   }
 
   if (strcmp(command, "help") == 0 || strcmp(command, "?") == 0) {
-    printHelp();
+    if (requireNoArgs(command, p)) printHelp();
   } else if (strcmp(command, "version") == 0 || strcmp(command, "ver") == 0) {
-    printVersion();
+    if (requireNoArgs(command, p)) printVersion();
   } else if (strcmp(command, "scan") == 0) {
-    bus_diag::scan();
+    if (requireNoArgs(command, p)) bus_diag::scan();
   } else if (strcmp(command, "begin") == 0) {
     handleBegin(p);
   } else if (strcmp(command, "addr") == 0) {
@@ -756,19 +880,19 @@ void handleCommand(String line) {
   } else if (strcmp(command, "rab") == 0) {
     handleResistance(p);
   } else if (strcmp(command, "probe") == 0) {
-    printStatus(gDev.probe());
+    if (requireNoArgs(command, p)) printStatus(gDev.probe());
   } else if (strcmp(command, "recover") == 0) {
-    printStatus(gDev.recover());
+    if (requireNoArgs(command, p)) printStatus(gDev.recover());
   } else if (strcmp(command, "iface_reset") == 0) {
-    printStatus(gDev.resetI2cState());
+    if (requireNoArgs(command, p)) printStatus(gDev.resetI2cState());
   } else if (strcmp(command, "defaults") == 0) {
-    printStatus(gDev.restorePowerOnDefaults());
+    if (requireNoArgs(command, p)) printStatus(gDev.restorePowerOnDefaults());
   } else if (strcmp(command, "read") == 0 || strcmp(command, "rregs") == 0) {
-    readRegisters();
+    if (requireNoArgs(command, p)) readRegisters();
   } else if (strcmp(command, "dump") == 0) {
-    dumpRegisters();
+    if (requireNoArgs(command, p)) dumpRegisters();
   } else if (strcmp(command, "last") == 0) {
-    handleLast();
+    if (requireNoArgs(command, p)) handleLast();
   } else if (strcmp(command, "rreg") == 0) {
     handleReadRegister(p);
   } else if (strcmp(command, "wreg") == 0 || strcmp(command, "wregs") == 0) {
@@ -778,11 +902,13 @@ void handleCommand(String line) {
   } else if (strcmp(command, "frac") == 0 || strcmp(command, "pos") == 0) {
     handleFraction(p);
   } else if (strcmp(command, "zero") == 0) {
-    printStatus(gDev.writeWiper(0));
+    if (requireNoArgs(command, p)) printStatus(gDev.writeWiper(0));
   } else if (strcmp(command, "mid") == 0) {
-    printStatus(gDev.writeWiperFraction(0.5f));
+    if (requireNoArgs(command, p)) printStatus(gDev.writeWiperFraction(0.5f));
   } else if (strcmp(command, "max") == 0) {
-    printStatus(gDev.writeWiper(MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution)));
+    if (requireNoArgs(command, p)) {
+      printStatus(gDev.writeWiper(MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution)));
+    }
   } else if (strcmp(command, "inc") == 0) {
     handleStep(p, true);
   } else if (strcmp(command, "dec") == 0) {
@@ -796,13 +922,13 @@ void handleCommand(String line) {
   } else if (strcmp(command, "mode") == 0) {
     handleMode(p);
   } else if (strcmp(command, "cfg") == 0 || strcmp(command, "settings") == 0) {
-    health_diag::printSettings(gDev);
+    if (requireNoArgs(command, p)) health_diag::printSettings(gDev);
   } else if (strcmp(command, "drv") == 0) {
-    health_view::printSummary(gDev);
+    if (requireNoArgs(command, p)) health_view::printSummary(gDev);
   } else if (strcmp(command, "info") == 0) {
-    printDeviceInfo();
+    if (requireNoArgs(command, p)) printDeviceInfo();
   } else if (strcmp(command, "selftest") == 0) {
-    runSelfTest();
+    if (requireNoArgs(command, p)) runSelfTest();
   } else if (strcmp(command, "stress") == 0) {
     runStress(p, false);
   } else if (strcmp(command, "stress_mix") == 0) {

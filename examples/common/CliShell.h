@@ -32,6 +32,8 @@ inline bool readLine(String& outLine) {
       if (overflowed) {
         buffer = "";
         overflowed = false;
+        LOGW("line too long");
+        LOG_SERIAL.print("> ");
         continue;
       }
       if (buffer.length() == 0U) {

@@ -17,6 +17,8 @@ namespace transport {
 struct BusResetContext {
   int sda = -1;
   int scl = -1;
+  uint32_t frequencyHz = 400000;
+  uint16_t timeoutMs = 50;
 };
 
 inline MCP45HVX1::Status mapWireResult(uint8_t result, const char* context) {
@@ -144,6 +146,7 @@ inline MCP45HVX1::Status wireBusReset(void* user) {
                                     "Bus reset pins not configured");
   }
 
+  Wire.end();
   pinMode(ctx->sda, INPUT_PULLUP);
   pinMode(ctx->scl, OUTPUT);
   for (int i = 0; i < 9; ++i) {
@@ -160,6 +163,10 @@ inline MCP45HVX1::Status wireBusReset(void* user) {
   digitalWrite(ctx->sda, HIGH);
   delayMicroseconds(5);
   pinMode(ctx->sda, INPUT_PULLUP);
+
+  Wire.begin(ctx->sda, ctx->scl);
+  Wire.setClock(ctx->frequencyHz);
+  Wire.setTimeOut(ctx->timeoutMs);
   return MCP45HVX1::Status::Ok();
 #else
   (void)user;

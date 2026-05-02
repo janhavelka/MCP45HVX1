@@ -40,10 +40,11 @@ inline void printSettings(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) 
              static_cast<unsigned>(s.config.resolution),
              s.config.allowAlternateAddressRange ? "yes" : "no",
              s.config.busReset != nullptr ? "yes" : "no");
-  out.printf("Device: rab=%s nominal=%u ohm step=%.3f ohm maxCode=0x%02X default=0x%02X\n",
+  out.printf("Device: rab=%s nominal=%u ohm step=%.3f ohm maxI=%.1f mA maxCode=0x%02X default=0x%02X\n",
              resistanceName(info.resistance),
              static_cast<unsigned>(info.nominalResistanceOhms),
              static_cast<double>(info.nominalStepOhms),
+             static_cast<double>(info.maxTerminalCurrentMilliAmps),
              info.maxWiperCode,
              info.defaultWiperCode);
   out.printf("Health: consecutive=%u totalFail=%lu totalOk=%lu lastErr=%u detail=%ld\n",

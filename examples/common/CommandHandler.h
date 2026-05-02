@@ -10,12 +10,30 @@
 #include <Arduino.h>
 
 #include <cerrno>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 
 #include "examples/common/Log.h"
 
 namespace cmd {
+
+inline int asciiCaseCmpN(const char* a, const char* b, size_t len) {
+  if (a == nullptr || b == nullptr) {
+    return a == b ? 0 : (a == nullptr ? -1 : 1);
+  }
+  for (size_t i = 0; i < len; ++i) {
+    const unsigned char ca = static_cast<unsigned char>(a[i]);
+    const unsigned char cb = static_cast<unsigned char>(b[i]);
+    const int la = std::tolower(ca);
+    const int lb = std::tolower(cb);
+    if (la != lb || ca == '\0' || cb == '\0') {
+      return la - lb;
+    }
+  }
+  return 0;
+}
 
 /**
  * @brief Check if serial data is available and read a line.
@@ -99,7 +117,10 @@ inline bool parseInt(const char* cmd, const char* keyword, int* outValue) {
  * @return true if command starts with keyword.
  */
 inline bool match(const char* cmd, const char* keyword) {
-  return strncasecmp(cmd, keyword, strlen(keyword)) == 0;
+  if (cmd == nullptr || keyword == nullptr) {
+    return false;
+  }
+  return asciiCaseCmpN(cmd, keyword, strlen(keyword)) == 0;
 }
 
 }  // namespace cmd

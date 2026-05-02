@@ -12,13 +12,25 @@ public:
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
   uint32_t getTimeOut() const { return _timeoutMs; }
 
-  void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; }
-  size_t write(uint8_t data) { _txBuf[_txLen++] = data; return 1; }
+  void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; _overflow = false; }
+  size_t write(uint8_t data) {
+    if (_txLen >= sizeof(_txBuf)) {
+      _overflow = true;
+      return 0;
+    }
+    _txBuf[_txLen++] = data;
+    return 1;
+  }
   size_t write(const uint8_t* data, size_t len) {
+    size_t written = 0;
     for (size_t i = 0; i < len && _txLen < sizeof(_txBuf); i++) {
       _txBuf[_txLen++] = data[i];
+      written++;
     }
-    return len;
+    if (written != len) {
+      _overflow = true;
+    }
+    return written;
   }
   uint8_t endTransmission(bool stop = true) { (void)stop; return _endTransmissionResult; }
 
@@ -55,6 +67,7 @@ public:
     _requestFromOverride = len;
   }
   void _clearRequestFromOverride() { _requestFromOverrideEnabled = false; }
+  bool _overflowed() const { return _overflow; }
 
   void end() {}
 
@@ -69,6 +82,7 @@ private:
   uint8_t _endTransmissionResult = 0;
   bool _requestFromOverrideEnabled = false;
   size_t _requestFromOverride = 0;
+  bool _overflow = false;
 };
 
 extern TwoWire Wire;

@@ -57,6 +57,9 @@ Status MCP45HVX1::begin(const Config& config) {
   if (config.resolution != Resolution::Bits7 && config.resolution != Resolution::Bits8) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid resolution");
   }
+  if (!_isValidResistanceOption(config.resistance)) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid resistance option");
+  }
   if (config.writeInitialWiper &&
       !_isValidWiperCode(config.initialWiperCode, config.resolution)) {
     return Status::Error(Err::INVALID_CONFIG, "Initial wiper code exceeds resolution");
@@ -167,6 +170,7 @@ DeviceInfo MCP45HVX1::getDeviceInfo() const {
   info.defaultWiperCode = defaultWiperCode(_config.resolution);
   info.nominalResistanceOhms = nominalResistanceOhms(_config.resistance);
   info.nominalStepOhms = stepResistanceOhms(_config.resistance, _config.resolution);
+  info.maxTerminalCurrentMilliAmps = maxTerminalCurrentMilliAmps(_config.resistance);
   info.usingAlternateAddressRange = _isAlternateAddress(_config.i2cAddress);
   return info;
 }
@@ -183,6 +187,9 @@ Status MCP45HVX1::probe() {
   uint8_t value = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, value);
   if (!st.ok()) {
+    if (st.code == Err::REGISTER_MISMATCH) {
+      return st;
+    }
     return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
   }
   return Status::Ok();
@@ -330,12 +337,10 @@ Status MCP45HVX1::setTerminalEnabled(Terminal terminal, bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Invalid terminal");
   }
 
-  uint8_t tcon = _cachedTcon;
-  if (!_cachedTconKnown) {
-    Status st = readTcon(tcon);
-    if (!st.ok()) {
-      return st;
-    }
+  uint8_t tcon = 0;
+  Status st = readTcon(tcon);
+  if (!st.ok()) {
+    return st;
   }
 
   uint8_t next = tcon;
@@ -376,12 +381,10 @@ Status MCP45HVX1::setSoftwareShutdown(bool enabled) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  uint8_t tcon = _cachedTcon;
-  if (!_cachedTconKnown) {
-    Status st = readTcon(tcon);
-    if (!st.ok()) {
-      return st;
-    }
+  uint8_t tcon = 0;
+  Status st = readTcon(tcon);
+  if (!st.ok()) {
+    return st;
   }
 
   uint8_t next = tcon;
@@ -415,6 +418,12 @@ Status MCP45HVX1::getSoftwareShutdown(bool& enabled) {
 Status MCP45HVX1::setTerminalMode(TerminalMode mode) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (mode == TerminalMode::Custom ||
+      (mode != TerminalMode::Potentiometer && mode != TerminalMode::RheostatBToW &&
+       mode != TerminalMode::RheostatAToW && mode != TerminalMode::WiperFloating &&
+       mode != TerminalMode::Shutdown)) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid terminal mode");
   }
   return writeTcon(_tconForMode(mode));
 }
@@ -508,7 +517,7 @@ Status MCP45HVX1::generalCallWriteWiper(uint8_t code) {
 
   Status st = _generalCallWrite(cmd::GC_WRITE_WIPER0, &code, 1);
   if (st.ok()) {
-    _syncRegister(cmd::REG_WIPER0, code);
+    _cachedWiperKnown = false;
   }
   return st;
 }
@@ -521,7 +530,7 @@ Status MCP45HVX1::generalCallWriteTcon(uint8_t value) {
   const uint8_t sanitized = sanitizeTcon(value);
   Status st = _generalCallWrite(cmd::GC_WRITE_TCON0, &sanitized, 1);
   if (st.ok()) {
-    _syncRegister(cmd::REG_TCON0, sanitized);
+    _cachedTconKnown = false;
   }
   return st;
 }
@@ -532,8 +541,8 @@ Status MCP45HVX1::generalCallIncrementWiper() {
   }
 
   Status st = _generalCallWrite(cmd::GC_INCREMENT_WIPER0, nullptr, 0);
-  if (st.ok() && _cachedWiperKnown) {
-    _cachedWiper = boundedAdd(_cachedWiper, 1, maxWiperCode(_config.resolution));
+  if (st.ok()) {
+    _cachedWiperKnown = false;
   }
   return st;
 }
@@ -544,8 +553,8 @@ Status MCP45HVX1::generalCallDecrementWiper() {
   }
 
   Status st = _generalCallWrite(cmd::GC_DECREMENT_WIPER0, nullptr, 0);
-  if (st.ok() && _cachedWiperKnown) {
-    _cachedWiper = boundedSub(_cachedWiper, 1);
+  if (st.ok()) {
+    _cachedWiperKnown = false;
   }
   return st;
 }
@@ -782,6 +791,11 @@ bool MCP45HVX1::_isAlternateAddress(uint8_t address) {
   return address >= cmd::ALT_MIN_ADDRESS && address <= cmd::ALT_MAX_ADDRESS;
 }
 
+bool MCP45HVX1::_isValidResistanceOption(ResistanceOption option) {
+  return option == ResistanceOption::R5K || option == ResistanceOption::R10K ||
+         option == ResistanceOption::R50K || option == ResistanceOption::R100K;
+}
+
 bool MCP45HVX1::_isValidRegister(uint8_t reg) {
   return reg == cmd::REG_WIPER0 || reg == cmd::REG_TCON0;
 }
@@ -819,6 +833,8 @@ uint8_t MCP45HVX1::_tconForMode(TerminalMode mode) {
       return cmd::TCON_WIPER_FLOATING;
     case TerminalMode::Shutdown:
       return cmd::TCON_SHUTDOWN;
+    case TerminalMode::Custom:
+      return cmd::TCON_POTENTIOMETER;
     default:
       return cmd::TCON_POTENTIOMETER;
   }
@@ -848,7 +864,7 @@ TerminalStatus MCP45HVX1::decodeTcon(uint8_t value) {
       break;
     default:
       status.mode = status.softwareShutdown ? TerminalMode::Shutdown
-                                            : TerminalMode::Potentiometer;
+                                            : TerminalMode::Custom;
       break;
   }
   return status;

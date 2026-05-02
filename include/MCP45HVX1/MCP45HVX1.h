@@ -33,7 +33,8 @@ enum class TerminalMode : uint8_t {
   RheostatBToW,  ///< P0A disconnected; P0B and P0W connected
   RheostatAToW,  ///< P0B disconnected; P0A and P0W connected
   WiperFloating, ///< P0W disconnected; P0A and P0B connected
-  Shutdown       ///< Software shutdown via R0HW=0
+  Shutdown,      ///< Software shutdown via R0HW=0
+  Custom         ///< Valid TCON state that does not match a named preset
 };
 
 /// Snapshot of current device registers.
@@ -58,8 +59,9 @@ struct DeviceInfo {
   ResistanceOption resistance = ResistanceOption::R10K;
   uint8_t maxWiperCode = cmd::WIPER_MAX_8BIT;
   uint8_t defaultWiperCode = cmd::WIPER_DEFAULT_8BIT;
-  uint16_t nominalResistanceOhms = 10000;
+  uint32_t nominalResistanceOhms = 10000;
   float nominalStepOhms = 0.0f;
+  float maxTerminalCurrentMilliAmps = 12.5f;
   bool usingAlternateAddressRange = false;
 };
 
@@ -183,7 +185,7 @@ public:
   }
 
   /// Nominal end-to-end resistance in ohms for an ordering option.
-  static constexpr uint16_t nominalResistanceOhms(ResistanceOption option) {
+  static constexpr uint32_t nominalResistanceOhms(ResistanceOption option) {
     return option == ResistanceOption::R5K
                ? 5000
                : (option == ResistanceOption::R10K
@@ -193,6 +195,13 @@ public:
 
   /// Ideal step resistance in ohms. Excludes tolerance, wiper resistance, INL/DNL, and leakage.
   static float stepResistanceOhms(ResistanceOption option, Resolution resolution);
+
+  /// Datasheet maximum terminal current in mA for a nominal RAB option.
+  static constexpr float maxTerminalCurrentMilliAmps(ResistanceOption option) {
+    return option == ResistanceOption::R5K
+               ? 25.0f
+               : (option == ResistanceOption::R10K ? 12.5f : 6.5f);
+  }
 
   /// Ideal B-to-W resistance in ohms for a wiper code.
   static float resistanceBToWOhms(uint8_t code, ResistanceOption option, Resolution resolution);
@@ -257,15 +266,19 @@ public:
   // =========================================================================
 
   /// Broadcast a Wiper 0 write using the General Call address.
+  /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   Status generalCallWriteWiper(uint8_t code);
 
   /// Broadcast a TCON0 write using the General Call address.
+  /// On ACK, the local TCON cache is marked unknown because ACK is not device-specific.
   Status generalCallWriteTcon(uint8_t value);
 
   /// Broadcast a Wiper 0 increment using the General Call address.
+  /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   Status generalCallIncrementWiper();
 
   /// Broadcast a Wiper 0 decrement using the General Call address.
+  /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   Status generalCallDecrementWiper();
 
 private:
@@ -290,6 +303,7 @@ private:
   static bool _isValidAddress(uint8_t address);
   static bool _isPrimaryAddress(uint8_t address);
   static bool _isAlternateAddress(uint8_t address);
+  static bool _isValidResistanceOption(ResistanceOption option);
   static bool _isValidRegister(uint8_t reg);
   static bool _isWritableRegister(uint8_t reg);
   static bool _isValidWiperCode(uint8_t code, Resolution resolution);

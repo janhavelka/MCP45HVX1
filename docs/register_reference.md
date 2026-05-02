@@ -38,6 +38,22 @@ Command values:
 | `10` | `Command::Decrement` | Decrement Wiper 0 |
 | `11` | `Command::ReadData` | Read selected register |
 
+## General Call Commands
+
+The driver sends only the documented General Call command forms and does not
+attempt to configure `GCEN`, whose register location is not identified in the
+available source notes.
+
+| Command byte | Driver helper | Payload |
+|---:|---|---|
+| `0x80` | `generalCallWriteWiper()` | One Wiper 0 data byte |
+| `0xC0` | `generalCallWriteTcon()` | One TCON0 data byte |
+| `0x84` | `generalCallIncrementWiper()` | None |
+| `0x88` | `generalCallDecrementWiper()` | None |
+
+Successful General Call helpers mark the affected local cache entry unknown
+because an ACK is broadcast and not device-specific.
+
 ## TCON0
 
 | Bit | Mask | Name | Meaning when 1 | Meaning when 0 |
@@ -59,3 +75,7 @@ Driver presets:
 | Rheostat A-W | `0xFE` |
 | Wiper floating | `0xFD` |
 | Software shutdown | `0xF7` |
+
+Valid lower-bit combinations that do not match a named preset decode as
+`TerminalMode::Custom`. `Custom` is a read/decode result and is not accepted by
+`setTerminalMode()`.

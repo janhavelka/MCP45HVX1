@@ -10,9 +10,9 @@ ESP32 (Arduino/PlatformIO).
 - **Volatile register API** - Wiper 0 and TCON0 read/write helpers
 - **Wiper commands** - direct write plus documented INC/DEC commands
 - **Terminal control** - potentiometer, rheostat, floating wiper, and software shutdown presets
-- **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames
+- **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames, with explicit `GCEN` caveats
 - **Bus-interface reset hook** - optional board callback for the documented software-reset/bus-release sequence
-- **Variant helpers** - 7-bit/8-bit code limits plus nominal resistance and position conversion helpers
+- **Variant helpers** - 7-bit/8-bit code limits, terminal-current limits, nominal resistance, and position conversion helpers
 - **Comprehensive bring-up CLI** - register, terminal, General Call, defaults, and stress commands
 - **Deterministic behavior** - no heap allocation in the core driver
 - **Settings snapshot** - runtime config, cache, and health counters
@@ -29,28 +29,27 @@ lib_deps =
 
 ### Manual
 
-Copy `include/MCP45HVX1/` and `src/` to your project.
+Copy `include/MCP45HVX1/` and `src/` to your project. The Quick Start also
+uses the optional example Wire adapter from `examples/common/I2cTransport.h`;
+copy that file too, or provide equivalent `Config` transport callbacks.
 
 ## Quick Start
 
 ```cpp
 #include <Wire.h>
 #include "MCP45HVX1/MCP45HVX1.h"
-
-MCP45HVX1::Status myI2cWrite(uint8_t addr, const uint8_t* data, size_t len,
-                             uint32_t timeoutMs, void* user);
-MCP45HVX1::Status myI2cWriteRead(uint8_t addr, const uint8_t* txData, size_t txLen,
-                                 uint8_t* rxData, size_t rxLen,
-                                 uint32_t timeoutMs, void* user);
+#include "examples/common/I2cTransport.h"
 
 MCP45HVX1::MCP45HVX1 pot;
 
 void setup() {
-  Wire.begin(8, 9, 400000);
+  Wire.begin(8, 9);
+  Wire.setClock(400000);
+  Wire.setTimeOut(50);
 
   MCP45HVX1::Config cfg;
-  cfg.i2cWrite = myI2cWrite;
-  cfg.i2cWriteRead = myI2cWriteRead;
+  cfg.i2cWrite = transport::wireWrite;
+  cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cUser = &Wire;
   cfg.i2cAddress = 0x3C;
   cfg.resolution = MCP45HVX1::Resolution::Bits8; // MCP45HV51
@@ -87,7 +86,7 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback
 - `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
-- `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, defaults
+- `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, terminal-current limit, defaults
 
 ### Wiper
 
@@ -100,6 +99,7 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status readWiperFraction(float& fraction)`
 - `Status writeWiperFraction(float fraction)`
 - `stepResistanceOhms()`, `resistanceBToWOhms()`, `resistanceAToWOhms()` - ideal helper math only
+- `maxTerminalCurrentMilliAmps()` - datasheet terminal-current limit by RAB option
 
 ### Terminal Control
 
@@ -113,6 +113,10 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status getTerminalMode(TerminalMode& mode)`
 - `Status readTerminalStatus(TerminalStatus& status)`
 - `TerminalStatus decodeTcon(uint8_t value)`
+
+`TerminalMode::Custom` is returned for valid TCON bit combinations that do not
+match a named preset. It is a decoded state, not a valid argument to
+`setTerminalMode()`.
 
 ### Direct Register Access
 
@@ -128,7 +132,10 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status generalCallDecrementWiper()`
 
 The datasheet references a `GCEN` bit but the extracted register location is not
-documented. This library sends only the documented General Call frames.
+documented. This library sends only the documented General Call frames. Because
+General Call ACKs are broadcast and not device-specific, successful General Call
+helpers mark the affected local cache entry unknown; call `readSnapshot()` to
+verify local state afterward.
 
 ## Configuration
 
@@ -189,6 +196,7 @@ frac 0.5
 mode bw
 term a 0
 tcon 0xFF
+gc arm
 gc inc
 dump
 drv
@@ -197,6 +205,7 @@ drv
 ## Running Tests
 
 ```bash
+python tools/validate.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio test -e native
@@ -211,6 +220,7 @@ python scripts/generate_version.py check
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
 - [Register Map](docs/05_register_map.md)
 - [Driver Register Reference](docs/register_reference.md)
+- [Hardware Validation Checklist](docs/hardware_validation.md)
 - [Protocol Commands](docs/04_protocol_commands_and_transactions.md)
 - [Initialization Notes](docs/07_initialization_reset_and_operational_notes.md)
 - [Release Notes v1.0.0](docs/releases/v1.0.0.md)

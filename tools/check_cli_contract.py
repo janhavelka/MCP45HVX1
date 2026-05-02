@@ -24,15 +24,46 @@ REQUIRED_COMMON = [
 
 MANDATORY_COMMANDS = [
     "help",
+    "?",
+    "version",
+    "ver",
     "scan",
+    "begin",
+    "addr",
+    "res",
+    "rab",
     "probe",
     "recover",
+    "iface_reset",
+    "defaults",
     "drv",
+    "cfg",
+    "settings",
+    "info",
     "read",
     "rregs",
+    "dump",
+    "last",
+    "rreg",
+    "wreg",
     "wregs",
+    "wiper",
+    "frac",
+    "pos",
+    "zero",
+    "mid",
+    "max",
+    "inc",
+    "dec",
+    "tcon",
+    "term",
+    "shutdown",
+    "mode",
+    "gc",
+    "selftest",
     "verbose",
     "stress",
+    "stress_mix",
 ]
 
 
@@ -70,8 +101,15 @@ def main() -> int:
     text = bringup_main.read_text(encoding="utf-8", errors="replace")
 
     for cmd in MANDATORY_COMMANDS:
-        if re.search(rf"\b{re.escape(cmd)}\b", text) is None:
-            fail(f"mandatory command '{cmd}' missing in {bringup_main.as_posix()}")
+        dispatch_re = re.compile(
+            rf'strcmp\s*\(\s*command\s*,\s*"{re.escape(cmd)}"\s*\)\s*==\s*0'
+        )
+        if dispatch_re.search(text) is None:
+            fail(f"mandatory command '{cmd}' missing from handleCommand() dispatch")
+        if cmd != "?":
+            help_re = re.compile(rf'printHelpItem\s*\(\s*"[^"]*\b{re.escape(cmd)}\b')
+            if help_re.search(text) is None:
+                fail(f"mandatory command '{cmd}' missing from help text")
 
     if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
         fail("either 'cfg' or 'settings' command must be present")

@@ -17,11 +17,23 @@ using namespace MCP45HVX1;
 namespace {
 
 struct FakeBus {
+  static constexpr size_t MAX_LOG = 16;
+
   uint32_t nowMs = 1000;
   uint32_t writeCalls = 0;
   uint32_t readCalls = 0;
   uint32_t generalCallWrites = 0;
   uint32_t resetCalls = 0;
+  uint8_t writeLogCount = 0;
+  uint8_t readLogCount = 0;
+  uint8_t writeAddrLog[MAX_LOG] = {};
+  uint8_t writeLenLog[MAX_LOG] = {};
+  uint8_t writeByte0Log[MAX_LOG] = {};
+  uint8_t writeByte1Log[MAX_LOG] = {};
+  uint8_t readAddrLog[MAX_LOG] = {};
+  uint8_t readTxLenLog[MAX_LOG] = {};
+  uint8_t readRxLenLog[MAX_LOG] = {};
+  uint8_t readTxByte0Log[MAX_LOG] = {};
 
   uint8_t wiper = cmd::WIPER_DEFAULT_8BIT;
   uint8_t tcon = cmd::TCON_DEFAULT;
@@ -35,6 +47,28 @@ struct FakeBus {
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
   Status resetStatus = Status::Ok();
 };
+
+void logWrite(FakeBus* bus, uint8_t addr, const uint8_t* data, size_t len) {
+  if (bus->writeLogCount >= FakeBus::MAX_LOG) {
+    return;
+  }
+  const uint8_t index = bus->writeLogCount++;
+  bus->writeAddrLog[index] = addr;
+  bus->writeLenLog[index] = static_cast<uint8_t>(len);
+  bus->writeByte0Log[index] = (data != nullptr && len > 0) ? data[0] : 0;
+  bus->writeByte1Log[index] = (data != nullptr && len > 1) ? data[1] : 0;
+}
+
+void logRead(FakeBus* bus, uint8_t addr, const uint8_t* txData, size_t txLen, size_t rxLen) {
+  if (bus->readLogCount >= FakeBus::MAX_LOG) {
+    return;
+  }
+  const uint8_t index = bus->readLogCount++;
+  bus->readAddrLog[index] = addr;
+  bus->readTxLenLog[index] = static_cast<uint8_t>(txLen);
+  bus->readRxLenLog[index] = static_cast<uint8_t>(rxLen);
+  bus->readTxByte0Log[index] = (txData != nullptr && txLen > 0) ? txData[0] : 0;
+}
 
 bool isValidFakeReg(uint8_t reg) {
   return reg == cmd::REG_WIPER0 || reg == cmd::REG_TCON0;
@@ -140,6 +174,7 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
     bus->writeErrorRemaining--;
     return bus->writeError;
   }
+  logWrite(bus, addr, data, len);
 
   if (addr == cmd::GENERAL_CALL_ADDRESS) {
     bus->generalCallWrites++;
@@ -155,7 +190,7 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
   return Status::Ok();
 }
 
-Status fakeWriteRead(uint8_t, const uint8_t* txData, size_t txLen, uint8_t* rxData,
+Status fakeWriteRead(uint8_t addr, const uint8_t* txData, size_t txLen, uint8_t* rxData,
                      size_t rxLen, uint32_t, void* user) {
   FakeBus* bus = static_cast<FakeBus*>(user);
   bus->readCalls++;
@@ -166,6 +201,7 @@ Status fakeWriteRead(uint8_t, const uint8_t* txData, size_t txLen, uint8_t* rxDa
     bus->readErrorRemaining--;
     return bus->readError;
   }
+  logRead(bus, addr, txData, txLen, rxLen);
 
   if (txLen > 0) {
     for (size_t i = 0; i < txLen; ++i) {
@@ -280,6 +316,11 @@ void test_begin_rejects_invalid_config() {
   cfg.i2cAddress = 0x60;
   st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+
+  cfg = makeConfig(bus);
+  cfg.resistance = static_cast<ResistanceOption>(99);
+  st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
 }
 
 void test_begin_accepts_documented_and_alternate_address_ranges() {
@@ -333,9 +374,24 @@ void test_device_info_and_resistance_helpers() {
                           static_cast<uint8_t>(info.resistance));
   TEST_ASSERT_EQUAL_UINT32(50000u, info.nominalResistanceOhms);
   TEST_ASSERT_FLOAT_WITHIN(0.1f, 196.08f, info.nominalStepOhms);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 6.5f, info.maxTerminalCurrentMilliAmps);
 
   TEST_ASSERT_EQUAL_UINT32(10000u,
                            MCP45HVX1::nominalResistanceOhms(ResistanceOption::R10K));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f,
+                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R5K));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f,
+                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R10K));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 6.5f,
+                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R100K));
+  TEST_ASSERT_EQUAL_UINT32(100000u,
+                           MCP45HVX1::nominalResistanceOhms(ResistanceOption::R100K));
+  TEST_ASSERT_FLOAT_WITHIN(0.5f, 392.16f,
+                           MCP45HVX1::stepResistanceOhms(ResistanceOption::R100K,
+                                                         Resolution::Bits8));
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, 50196.0f,
+                           MCP45HVX1::resistanceBToWOhms(0x80, ResistanceOption::R100K,
+                                                         Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(0.1f, 39.22f,
                            MCP45HVX1::stepResistanceOhms(ResistanceOption::R10K,
                                                          Resolution::Bits8));
@@ -383,6 +439,43 @@ void test_read_write_wiper() {
   TEST_ASSERT_TRUE(dev.readWiper(value).ok());
   TEST_ASSERT_EQUAL_HEX8(0x80, value);
   TEST_ASSERT_EQUAL_UINT32(2u, dev.totalSuccess());
+}
+
+void test_wire_protocol_frames() {
+  FakeBus bus;
+  MCP45HVX1::MCP45HVX1 dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_UINT8(3u, bus.readLogCount);
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, bus.readAddrLog[2]);
+  TEST_ASSERT_EQUAL_UINT8(1u, bus.readTxLenLog[2]);
+  TEST_ASSERT_EQUAL_UINT8(cmd::READ_RESPONSE_LEN, bus.readRxLenLog[2]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::ReadData),
+                         bus.readTxByte0Log[2]);
+
+  TEST_ASSERT_TRUE(dev.writeWiper(0x33).ok());
+  TEST_ASSERT_EQUAL_UINT8(1u, bus.writeLogCount);
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, bus.writeAddrLog[0]);
+  TEST_ASSERT_EQUAL_UINT8(2u, bus.writeLenLog[0]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::WriteData),
+                         bus.writeByte0Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x33, bus.writeByte1Log[0]);
+
+  TEST_ASSERT_TRUE(dev.incrementWiper(70).ok());
+  TEST_ASSERT_EQUAL_UINT8(3u, bus.writeLogCount);
+  TEST_ASSERT_EQUAL_UINT8(cmd::MAX_COMMAND_CHUNK, bus.writeLenLog[1]);
+  TEST_ASSERT_EQUAL_UINT8(6u, bus.writeLenLog[2]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::Increment),
+                         bus.writeByte0Log[1]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::Increment),
+                         bus.writeByte0Log[2]);
+
+  TEST_ASSERT_TRUE(dev.readLastAddress(value).ok());
+  TEST_ASSERT_EQUAL_UINT8(4u, bus.readLogCount);
+  TEST_ASSERT_EQUAL_UINT8(0u, bus.readTxLenLog[3]);
+  TEST_ASSERT_EQUAL_UINT8(cmd::READ_RESPONSE_LEN, bus.readRxLenLog[3]);
 }
 
 void test_7bit_wiper_rejects_out_of_range() {
@@ -460,6 +553,16 @@ void test_terminal_helpers() {
   TEST_ASSERT_TRUE(status.softwareShutdown);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TerminalMode::Shutdown),
                           static_cast<uint8_t>(status.mode));
+
+  TEST_ASSERT_TRUE(dev.writeTcon(0xFA).ok());
+  TEST_ASSERT_TRUE(dev.readTerminalStatus(status).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TerminalMode::Custom),
+                          static_cast<uint8_t>(status.mode));
+
+  Status st = dev.setTerminalMode(static_cast<TerminalMode>(99));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = dev.setTerminalMode(TerminalMode::Custom);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
 void test_direct_register_access_rejects_reserved() {
@@ -523,13 +626,26 @@ void test_general_call_helpers() {
 
   TEST_ASSERT_TRUE(dev.generalCallWriteWiper(0x44).ok());
   TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
 
   TEST_ASSERT_TRUE(dev.generalCallIncrementWiper().ok());
   TEST_ASSERT_EQUAL_HEX8(0x45, bus.wiper);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+
+  TEST_ASSERT_TRUE(dev.generalCallDecrementWiper().ok());
+  TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
 
   TEST_ASSERT_TRUE(dev.generalCallWriteTcon(0x07).ok());
   TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
-  TEST_ASSERT_EQUAL_UINT32(3u, bus.generalCallWrites);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedTconKnown);
+  TEST_ASSERT_EQUAL_UINT32(4u, bus.generalCallWrites);
+
+  bus.resolution = Resolution::Bits7;
+  MCP45HVX1::MCP45HVX1 dev7;
+  TEST_ASSERT_TRUE(dev7.begin(makeConfig(bus)).ok());
+  Status st = dev7.generalCallWriteWiper(0x80);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
 void test_probe_does_not_update_health_but_recover_does() {
@@ -553,6 +669,18 @@ void test_probe_does_not_update_health_but_recover_does() {
   TEST_ASSERT_EQUAL_UINT32(2000u, dev.lastErrorMs());
 }
 
+void test_probe_preserves_register_mismatch() {
+  FakeBus bus;
+  MCP45HVX1::MCP45HVX1 dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.readMsb = 0x01;
+  Status st = dev.probe();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+}
+
 void test_offline_threshold() {
   FakeBus bus;
   MCP45HVX1::MCP45HVX1 dev;
@@ -566,6 +694,15 @@ void test_offline_threshold() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
                           static_cast<uint8_t>(dev.state()));
+}
+
+void test_offline_threshold_zero_normalizes_to_one() {
+  FakeBus bus;
+  MCP45HVX1::MCP45HVX1 dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 0;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.getConfig().offlineThreshold);
 }
 
 void test_read_msb_mismatch_is_reported() {
@@ -592,6 +729,42 @@ void test_tracked_read_msb_mismatch_updates_health() {
   TEST_ASSERT_EQUAL_UINT32(3000u, dev.lastErrorMs());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
                           static_cast<uint8_t>(dev.state()));
+}
+
+void test_require_read_msb_zero_can_be_disabled() {
+  FakeBus bus;
+  bus.readMsb = 0x01;
+  MCP45HVX1::MCP45HVX1 dev;
+  Config cfg = makeConfig(bus);
+  cfg.requireReadMsbZero = false;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+}
+
+void test_zero_step_commands_are_noops() {
+  FakeBus bus;
+  MCP45HVX1::MCP45HVX1 dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t writesBefore = bus.writeCalls;
+
+  TEST_ASSERT_TRUE(dev.incrementWiper(0).ok());
+  TEST_ASSERT_TRUE(dev.decrementWiper(0).ok());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+}
+
+void test_failed_bus_reset_updates_health() {
+  FakeBus bus;
+  MCP45HVX1::MCP45HVX1 dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.resetStatus = Status::Error(Err::I2C_BUS, "forced reset fail", -3);
+  bus.nowMs = 4000;
+  Status st = dev.resetI2cState();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(4000u, dev.lastErrorMs());
 }
 
 void test_conversions() {
@@ -669,6 +842,15 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
   TEST_ASSERT_TRUE(st.ok());
   TEST_ASSERT_EQUAL_HEX8(0x7F, rx[1]);
+
+  Wire._setRequestFromResult(1);
+  st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  Wire._clearRequestFromOverride();
+
+  uint8_t tooLargeForStub[65] = {};
+  st = transport::wireWrite(0x3C, tooLargeForStub, sizeof(tooLargeForStub), 123, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
 }
 
 int main() {
@@ -684,6 +866,7 @@ int main() {
   RUN_TEST(test_begin_require_power_on_defaults);
   RUN_TEST(test_begin_optional_initial_writes);
   RUN_TEST(test_read_write_wiper);
+  RUN_TEST(test_wire_protocol_frames);
   RUN_TEST(test_7bit_wiper_rejects_out_of_range);
   RUN_TEST(test_increment_decrement_clamp_and_cache);
   RUN_TEST(test_tcon_write_sanitizes_reserved_bits);
@@ -694,9 +877,14 @@ int main() {
   RUN_TEST(test_i2c_reset_reports_unsupported_without_callback);
   RUN_TEST(test_general_call_helpers);
   RUN_TEST(test_probe_does_not_update_health_but_recover_does);
+  RUN_TEST(test_probe_preserves_register_mismatch);
   RUN_TEST(test_offline_threshold);
+  RUN_TEST(test_offline_threshold_zero_normalizes_to_one);
   RUN_TEST(test_read_msb_mismatch_is_reported);
   RUN_TEST(test_tracked_read_msb_mismatch_updates_health);
+  RUN_TEST(test_require_read_msb_zero_can_be_disabled);
+  RUN_TEST(test_zero_step_commands_are_noops);
+  RUN_TEST(test_failed_bus_reset_updates_health);
   RUN_TEST(test_conversions);
   RUN_TEST(test_fraction_read_write_helpers);
   RUN_TEST(test_operations_reject_before_begin);

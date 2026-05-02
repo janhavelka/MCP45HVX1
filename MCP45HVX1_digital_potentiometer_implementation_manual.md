@@ -76,7 +76,9 @@ operate on the documented lower bits:
 - `R0B`: P0B terminal connection
 
 `decodeTcon()`, `readTerminalStatus()`, and `getTerminalMode()` expose decoded
-state for CLI and diagnostics.
+state for CLI and diagnostics. TCON combinations that are valid but do not match
+a named preset decode as `TerminalMode::Custom`; `Custom` is not accepted by
+`setTerminalMode()`.
 
 ## Health Tracking
 
@@ -98,7 +100,10 @@ Semantic readback failures, such as a non-zero read MSB when
 
 The driver exposes helpers for the documented General Call frames. It does not
 attempt to configure `GCEN` because the register location is not documented in
-the available source notes.
+the available source notes. Successful General Call writes mark the affected
+local cache entry unknown because ACKs are broadcast and do not prove the local
+configured device executed the command. The CLI requires `gc arm` before each
+broadcast command attempt.
 
 ## CLI Coverage
 
@@ -110,4 +115,5 @@ The `01_basic_bringup_cli` example exposes practical chip features:
 - terminal operations: `tcon`, `term`, `shutdown`, `mode`
 - diagnostics: `cfg`, `settings`, `drv`, `info`, `selftest`, `stress`,
   `stress_mix`, `iface_reset`
-- General Call frames: `gc wiper`, `gc tcon`, `gc inc`, `gc dec`
+- General Call frames: `gc arm`, `gc disarm`, `gc wiper`, `gc tcon`, `gc inc`,
+  `gc dec`
