@@ -14,6 +14,11 @@
 
 namespace transport {
 
+struct BusResetContext {
+  int sda = -1;
+  int scl = -1;
+};
+
 inline MCP45HVX1::Status mapWireResult(uint8_t result, const char* context) {
   switch (result) {
     case 0:
@@ -131,5 +136,36 @@ inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutM
   return true;
 }
 
-}  // namespace transport
+inline MCP45HVX1::Status wireBusReset(void* user) {
+#if defined(ARDUINO_ARCH_ESP32)
+  BusResetContext* ctx = static_cast<BusResetContext*>(user);
+  if (ctx == nullptr || ctx->sda < 0 || ctx->scl < 0) {
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG,
+                                    "Bus reset pins not configured");
+  }
 
+  pinMode(ctx->sda, INPUT_PULLUP);
+  pinMode(ctx->scl, OUTPUT);
+  for (int i = 0; i < 9; ++i) {
+    digitalWrite(ctx->scl, LOW);
+    delayMicroseconds(5);
+    digitalWrite(ctx->scl, HIGH);
+    delayMicroseconds(5);
+  }
+  pinMode(ctx->sda, OUTPUT);
+  digitalWrite(ctx->sda, LOW);
+  delayMicroseconds(5);
+  digitalWrite(ctx->scl, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(ctx->sda, HIGH);
+  delayMicroseconds(5);
+  pinMode(ctx->sda, INPUT_PULLUP);
+  return MCP45HVX1::Status::Ok();
+#else
+  (void)user;
+  return MCP45HVX1::Status::Error(MCP45HVX1::Err::UNSUPPORTED,
+                                  "Wire bus reset requires Arduino ESP32 GPIO");
+#endif
+}
+
+}  // namespace transport

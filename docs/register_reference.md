@@ -5,6 +5,10 @@ source extraction details remain in `05_register_map.md`.
 
 ## Address Summary
 
+Documented 7-bit I2C addresses are `0x3C-0x3F` from A1:A0. The conflicting
+`0x5C-0x5F` extraction is accepted only when
+`Config::allowAlternateAddressRange` is enabled.
+
 | Address | Name | Access | Reset |
 |---:|---|---|---:|
 | `0x00` | Volatile Wiper 0 | R/W/INC/DEC | `0x7F` 8-bit, `0x3F` 7-bit |
@@ -44,6 +48,8 @@ Command values:
 | `1` | `0x02` | `R0W` | P0W connected | P0W disconnected |
 | `0` | `0x01` | `R0B` | P0B connected | P0B disconnected |
 
+Implemented lower-bit mask: `0x0F`. Reserved write mask: `0xF0`.
+
 Driver presets:
 
 | Preset | TCON value |
@@ -53,4 +59,3 @@ Driver presets:
 | Rheostat A-W | `0xFE` |
 | Wiper floating | `0xFD` |
 | Software shutdown | `0xF7` |
-

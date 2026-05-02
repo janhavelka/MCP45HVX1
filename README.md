@@ -11,6 +11,9 @@ ESP32 (Arduino/PlatformIO).
 - **Wiper commands** - direct write plus documented INC/DEC commands
 - **Terminal control** - potentiometer, rheostat, floating wiper, and software shutdown presets
 - **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames
+- **Bus-interface reset hook** - optional board callback for the documented software-reset/bus-release sequence
+- **Variant helpers** - 7-bit/8-bit code limits plus nominal resistance and position conversion helpers
+- **Comprehensive bring-up CLI** - register, terminal, General Call, defaults, and stress commands
 - **Deterministic behavior** - no heap allocation in the core driver
 - **Settings snapshot** - runtime config, cache, and health counters
 - **Native tests** - fake-bus protocol tests for register and command behavior
@@ -81,7 +84,10 @@ The ready-made Arduino transport adapter used by the example CLI is in
 
 - `Status probe()` - raw Wiper read without health-counter updates
 - `Status recover()` - tracked Wiper/TCON reads to refresh cache and health
+- `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback
+- `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
+- `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, defaults
 
 ### Wiper
 
@@ -91,6 +97,9 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status decrementWiper(uint8_t steps = 1)`
 - `uint8_t codeFromFraction(float fraction, Resolution resolution)`
 - `float fractionFromCode(uint8_t code, Resolution resolution)`
+- `Status readWiperFraction(float& fraction)`
+- `Status writeWiperFraction(float fraction)`
+- `stepResistanceOhms()`, `resistanceBToWOhms()`, `resistanceAToWOhms()` - ideal helper math only
 
 ### Terminal Control
 
@@ -101,6 +110,9 @@ The ready-made Arduino transport adapter used by the example CLI is in
 - `Status setSoftwareShutdown(bool enabled)`
 - `Status getSoftwareShutdown(bool& enabled)`
 - `Status setTerminalMode(TerminalMode mode)`
+- `Status getTerminalMode(TerminalMode& mode)`
+- `Status readTerminalStatus(TerminalStatus& status)`
+- `TerminalStatus decodeTcon(uint8_t value)`
 
 ### Direct Register Access
 
@@ -124,7 +136,11 @@ documented. This library sends only the documented General Call frames.
 |---|---:|---|
 | `i2cAddress` | `0x3C` | A1=A0=0 address |
 | `resolution` | `Bits8` | `Bits8` for MCP45HV51, `Bits7` for MCP45HV31 |
+| `resistance` | `R10K` | Nominal RAB option for helper math |
+| `allowAlternateAddressRange` | `false` | Opt-in disputed `0x5C-0x5F` address range |
 | `i2cTimeoutMs` | `50` | Transport timeout |
+| `busReset` | `nullptr` | Optional board callback for I2C bus/software reset |
+| `controlUser` | `nullptr` | Context pointer for `busReset` |
 | `writeInitialWiper` | `false` | Opt-in Wiper write during `begin()` |
 | `initialWiperCode` | `0x7F` | Wiper value used when opt-in write is enabled |
 | `writeInitialTcon` | `false` | Opt-in TCON write during `begin()` |
@@ -150,15 +166,17 @@ DS20005304B Rev B Table 6-2 and the official PDF text give fixed address bits
 `01111`, so the default address range is `0x3C-0x3F`. The extracted markdown in
 `docs/08_variant_differences_and_open_questions.md` records an apparent
 `0x5C-0x5F` conflict from command figures. The driver defaults to `0x3C` and
-accepts both ranges so hardware-verification builds can test either candidate.
-See `ASSUMPTIONS.md`.
+accepts `0x5C-0x5F` only when `Config::allowAlternateAddressRange` is explicitly
+enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
 
 ## Examples
 
 ### 01_basic_bringup_cli
 
-Interactive serial CLI with commands for bus scan, probe/recover, settings,
-Wiper/TCON reads and writes, terminal modes, and a small INC/DEC stress pass.
+Interactive serial CLI with commands for bus scan, begin/reconfigure,
+probe/recover, settings, Wiper/TCON reads and writes, direct register access,
+terminal modes, General Call frames, volatile defaults, I2C interface reset, and
+stress passes.
 
 Typical commands:
 
@@ -167,8 +185,12 @@ scan
 cfg
 read
 wiper 0x80
+frac 0.5
 mode bw
+term a 0
 tcon 0xFF
+gc inc
+dump
 drv
 ```
 

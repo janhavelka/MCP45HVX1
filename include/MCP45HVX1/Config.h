@@ -21,6 +21,13 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
                                   uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
                                   void* user);
 
+/// Optional bus reset callback.
+///
+/// Use this for the datasheet software reset sequence (Start, nine '1' bits,
+/// Start, Stop) or an equivalent bus-release implementation. The core driver
+/// cannot bit-bang SCL/SDA because it is intentionally board-agnostic.
+using BusResetFn = Status (*)(void* user);
+
 /// Millisecond timestamp callback.
 using NowMsFn = uint32_t (*)(void* user);
 
@@ -30,12 +37,22 @@ enum class Resolution : uint8_t {
   Bits8 = 8   ///< MCP45HV51, valid wiper codes 0x00-0xFF
 };
 
+/// Nominal RAB resistance option from the device ordering code.
+enum class ResistanceOption : uint8_t {
+  R5K,    ///< -502, nominal 5 kOhm
+  R10K,   ///< -103, nominal 10 kOhm
+  R50K,   ///< -503, nominal 50 kOhm
+  R100K   ///< -104, nominal 100 kOhm
+};
+
 /// Configuration for MCP45HVX1 driver.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
   I2cWriteReadFn i2cWriteRead = nullptr; ///< I2C write-read/read function pointer
   void* i2cUser = nullptr;               ///< User context for callbacks
+  BusResetFn busReset = nullptr;         ///< Optional I2C bus reset/software-reset callback
+  void* controlUser = nullptr;           ///< User context for busReset
 
   // === Timing Hooks (optional) ===
   NowMsFn nowMs = nullptr;               ///< Monotonic millisecond source
@@ -45,6 +62,8 @@ struct Config {
   uint8_t i2cAddress = 0x3C;             ///< 0x3C-0x3F per DS20005304B Table 6-2
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
   Resolution resolution = Resolution::Bits8; ///< Device variant, MCP45HV51 by default
+  ResistanceOption resistance = ResistanceOption::R10K; ///< Nominal RAB option for helper math
+  bool allowAlternateAddressRange = false; ///< Allow disputed 0x5C-0x5F range for hardware checks
 
   // === Optional Initialization Writes ===
   bool writeInitialWiper = false;        ///< Write initialWiperCode during begin()
@@ -61,4 +80,3 @@ struct Config {
 };
 
 }  // namespace MCP45HVX1
-

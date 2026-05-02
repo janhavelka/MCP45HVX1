@@ -11,6 +11,8 @@ The core library never calls `Wire` directly. Applications provide:
 - `Config::i2cWrite`
 - `Config::i2cWriteRead`
 - `Config::i2cUser`
+- `Config::busReset` and `Config::controlUser` for optional board-specific
+  I2C interface reset
 
 The example adapter in `examples/common/I2cTransport.h` maps `TwoWire` errors to
 the driver `Status` model.
@@ -28,6 +30,11 @@ Optional startup writes are available:
 
 Use these only when changing the wiper/terminal state during MCU startup is
 intentional for the hardware design.
+
+`restorePowerOnDefaults()` explicitly writes the documented volatile defaults:
+TCON0 `0xFF` and Wiper 0 `0x7F` for 8-bit parts or `0x3F` for 7-bit parts.
+`resetI2cState()` calls the optional board reset callback and does not alter
+Wiper/TCON state.
 
 ## Register Access
 
@@ -53,6 +60,11 @@ The configured resolution controls input validation:
 INC/DEC frames. The driver cache clamps at full-scale and zero-scale after
 successful commands.
 
+`readWiperFraction()` and `writeWiperFraction()` provide normalized `0.0-1.0`
+position helpers. `stepResistanceOhms()`, `resistanceBToWOhms()`, and
+`resistanceAToWOhms()` are ideal nominal helpers from the configured ordering
+option. They do not include analog tolerance terms.
+
 ## TCON Handling
 
 TCON reserved bits `[7:4]` are forced high on all driver writes. Public helpers
@@ -62,6 +74,9 @@ operate on the documented lower bits:
 - `R0A`: P0A terminal connection
 - `R0W`: P0W terminal connection
 - `R0B`: P0B terminal connection
+
+`decodeTcon()`, `readTerminalStatus()`, and `getTerminalMode()` expose decoded
+state for CLI and diagnostics.
 
 ## Health Tracking
 
@@ -76,9 +91,23 @@ Tracked public I2C operations update:
 `probe()` uses the raw path and does not update health. `recover()` uses tracked
 reads so communication failures are visible in health counters.
 
+Semantic readback failures, such as a non-zero read MSB when
+`requireReadMsbZero` is enabled, are also recorded as tracked health failures.
+
 ## General Call
 
 The driver exposes helpers for the documented General Call frames. It does not
 attempt to configure `GCEN` because the register location is not documented in
 the available source notes.
 
+## CLI Coverage
+
+The `01_basic_bringup_cli` example exposes practical chip features:
+
+- device setup: `begin`, `addr`, `res`, `rab`, `scan`, `probe`, `recover`
+- register operations: `read`, `dump`, `rreg`, `wreg`, `last`
+- wiper operations: `wiper`, `frac`, `pos`, `zero`, `mid`, `max`, `inc`, `dec`
+- terminal operations: `tcon`, `term`, `shutdown`, `mode`
+- diagnostics: `cfg`, `settings`, `drv`, `info`, `selftest`, `stress`,
+  `stress_mix`, `iface_reset`
+- General Call frames: `gc wiper`, `gc tcon`, `gc inc`, `gc dec`

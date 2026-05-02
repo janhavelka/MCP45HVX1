@@ -7,9 +7,19 @@
 #include <cstring>
 #include <string>
 #include <cstdlib>
+#include <cctype>
 
 // Basic types
 using byte = uint8_t;
+static constexpr int INPUT = 0;
+static constexpr int OUTPUT = 1;
+static constexpr int INPUT_PULLUP = 2;
+static constexpr int LOW = 0;
+static constexpr int HIGH = 1;
+
+inline void pinMode(int pin, int mode) { (void)pin; (void)mode; }
+inline void digitalWrite(int pin, int value) { (void)pin; (void)value; }
+inline int digitalRead(int pin) { (void)pin; return HIGH; }
 
 // Timing stubs
 inline uint32_t gMillisValue = 0;
@@ -27,10 +37,13 @@ public:
   void print(const char* s) { (void)s; }
   void println(const char* s = "") { (void)s; }
   void printf(const char* fmt, ...) { (void)fmt; }
+  void flush() {}
   int available() { return 0; }
   int read() { return -1; }
   operator bool() { return true; }
 };
+
+using Print = SerialClass;
 
 extern SerialClass Serial;
 
@@ -41,7 +54,18 @@ public:
   String(const char* s) : _data(s ? s : "") {}
   const char* c_str() const { return _data.c_str(); }
   size_t length() const { return _data.length(); }
+  bool reserve(size_t size) { _data.reserve(size); return true; }
   void trim() {}
+  void remove(size_t index) {
+    if (index < _data.size()) {
+      _data.erase(index);
+    }
+  }
+  void toLowerCase() {
+    for (char& c : _data) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+  }
   bool startsWith(const char* prefix) const {
     return _data.find(prefix) == 0;
   }

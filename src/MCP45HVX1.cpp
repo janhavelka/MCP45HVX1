@@ -50,7 +50,8 @@ Status MCP45HVX1::begin(const Config& config) {
   if (config.i2cTimeoutMs == 0) {
     return Status::Error(Err::INVALID_CONFIG, "I2C timeout must be > 0");
   }
-  if (!_isValidAddress(config.i2cAddress)) {
+  if (!_isValidAddress(config.i2cAddress) ||
+      (_isAlternateAddress(config.i2cAddress) && !config.allowAlternateAddressRange)) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address");
   }
   if (config.resolution != Resolution::Bits7 && config.resolution != Resolution::Bits8) {
@@ -157,6 +158,19 @@ SettingsSnapshot MCP45HVX1::getSettings() const {
   return snapshot;
 }
 
+DeviceInfo MCP45HVX1::getDeviceInfo() const {
+  DeviceInfo info;
+  info.i2cAddress = _config.i2cAddress;
+  info.resolution = _config.resolution;
+  info.resistance = _config.resistance;
+  info.maxWiperCode = maxWiperCode(_config.resolution);
+  info.defaultWiperCode = defaultWiperCode(_config.resolution);
+  info.nominalResistanceOhms = nominalResistanceOhms(_config.resistance);
+  info.nominalStepOhms = stepResistanceOhms(_config.resistance, _config.resolution);
+  info.usingAlternateAddressRange = _isAlternateAddress(_config.i2cAddress);
+  return info;
+}
+
 // ===========================================================================
 // Diagnostics
 // ===========================================================================
@@ -185,6 +199,40 @@ Status MCP45HVX1::recover() {
     return st;
   }
   return Status::Ok();
+}
+
+Status MCP45HVX1::resetI2cState() {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_config.busReset == nullptr) {
+    return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
+  }
+
+  Status st = _config.busReset(_config.controlUser);
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
+      st.code == Err::UNSUPPORTED) {
+    return st;
+  }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
+
+  _addressPointerKnown = false;
+  _addressPointer = cmd::REG_WIPER0;
+  return _updateHealth(st);
+}
+
+Status MCP45HVX1::restorePowerOnDefaults() {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+
+  Status st = writeTcon(cmd::TCON_DEFAULT);
+  if (!st.ok()) {
+    return st;
+  }
+  return writeWiper(defaultWiperCode(_config.resolution));
 }
 
 // ===========================================================================
@@ -222,6 +270,42 @@ float MCP45HVX1::fractionFromCode(uint8_t code, Resolution resolution) {
   const uint8_t maxCode = maxWiperCode(resolution);
   const uint8_t bounded = code > maxCode ? maxCode : code;
   return static_cast<float>(bounded) / static_cast<float>(maxCode);
+}
+
+Status MCP45HVX1::readWiperFraction(float& fraction) {
+  uint8_t code = 0;
+  Status st = readWiper(code);
+  if (!st.ok()) {
+    return st;
+  }
+  fraction = fractionFromCode(code, _config.resolution);
+  return Status::Ok();
+}
+
+Status MCP45HVX1::writeWiperFraction(float fraction) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (!(fraction >= 0.0f && fraction <= 1.0f)) {
+    return Status::Error(Err::INVALID_PARAM, "Wiper fraction must be 0.0-1.0");
+  }
+  return writeWiper(codeFromFraction(fraction, _config.resolution));
+}
+
+float MCP45HVX1::stepResistanceOhms(ResistanceOption option, Resolution resolution) {
+  const uint8_t maxCode = maxWiperCode(resolution);
+  return static_cast<float>(nominalResistanceOhms(option)) / static_cast<float>(maxCode);
+}
+
+float MCP45HVX1::resistanceBToWOhms(uint8_t code, ResistanceOption option,
+                                    Resolution resolution) {
+  return fractionFromCode(code, resolution) * static_cast<float>(nominalResistanceOhms(option));
+}
+
+float MCP45HVX1::resistanceAToWOhms(uint8_t code, ResistanceOption option,
+                                    Resolution resolution) {
+  return (1.0f - fractionFromCode(code, resolution)) *
+         static_cast<float>(nominalResistanceOhms(option));
 }
 
 // ===========================================================================
@@ -333,6 +417,26 @@ Status MCP45HVX1::setTerminalMode(TerminalMode mode) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
   return writeTcon(_tconForMode(mode));
+}
+
+Status MCP45HVX1::getTerminalMode(TerminalMode& mode) {
+  TerminalStatus status;
+  Status st = readTerminalStatus(status);
+  if (!st.ok()) {
+    return st;
+  }
+  mode = status.mode;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::readTerminalStatus(TerminalStatus& status) {
+  uint8_t tcon = 0;
+  Status st = readTcon(tcon);
+  if (!st.ok()) {
+    return st;
+  }
+  status = decodeTcon(tcon);
+  return Status::Ok();
 }
 
 Status MCP45HVX1::readSnapshot(RegisterSnapshot& snapshot) {
@@ -529,13 +633,20 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
 
   const uint8_t command = cmd::makeCommand(reg, cmd::Command::ReadData);
   uint8_t rx[cmd::READ_RESPONSE_LEN] = {};
-  Status st = _i2cWriteReadTracked(_config.i2cAddress, &command, 1, rx, sizeof(rx));
-  if (!st.ok()) {
+  Status st = _i2cWriteReadRaw(_config.i2cAddress, &command, 1, rx, sizeof(rx));
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
   if (_config.requireReadMsbZero && rx[cmd::READ_MSB_INDEX] != 0x00) {
-    return Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
-                         rx[cmd::READ_MSB_INDEX]);
+    return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
+                                        rx[cmd::READ_MSB_INDEX]));
+  }
+  st = _updateHealth(st);
+  if (!st.ok()) {
+    return st;
   }
   value = rx[cmd::READ_LSB_INDEX];
   _addressPointerKnown = true;
@@ -545,13 +656,20 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
 
 Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
   uint8_t rx[cmd::READ_RESPONSE_LEN] = {};
-  Status st = _i2cWriteReadTracked(_config.i2cAddress, nullptr, 0, rx, sizeof(rx));
-  if (!st.ok()) {
+  Status st = _i2cWriteReadRaw(_config.i2cAddress, nullptr, 0, rx, sizeof(rx));
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
   if (_config.requireReadMsbZero && rx[cmd::READ_MSB_INDEX] != 0x00) {
-    return Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
-                         rx[cmd::READ_MSB_INDEX]);
+    return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
+                                        rx[cmd::READ_MSB_INDEX]));
+  }
+  st = _updateHealth(st);
+  if (!st.ok()) {
+    return st;
   }
   value = rx[cmd::READ_LSB_INDEX];
   if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
@@ -653,8 +771,15 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
 // ===========================================================================
 
 bool MCP45HVX1::_isValidAddress(uint8_t address) {
-  return (address >= cmd::MIN_ADDRESS && address <= cmd::MAX_ADDRESS) ||
-         (address >= cmd::ALT_MIN_ADDRESS && address <= cmd::ALT_MAX_ADDRESS);
+  return _isPrimaryAddress(address) || _isAlternateAddress(address);
+}
+
+bool MCP45HVX1::_isPrimaryAddress(uint8_t address) {
+  return address >= cmd::MIN_ADDRESS && address <= cmd::MAX_ADDRESS;
+}
+
+bool MCP45HVX1::_isAlternateAddress(uint8_t address) {
+  return address >= cmd::ALT_MIN_ADDRESS && address <= cmd::ALT_MAX_ADDRESS;
 }
 
 bool MCP45HVX1::_isValidRegister(uint8_t reg) {
@@ -697,6 +822,36 @@ uint8_t MCP45HVX1::_tconForMode(TerminalMode mode) {
     default:
       return cmd::TCON_POTENTIOMETER;
   }
+}
+
+TerminalStatus MCP45HVX1::decodeTcon(uint8_t value) {
+  const uint8_t sanitized = sanitizeTcon(value);
+  TerminalStatus status;
+  status.softwareShutdown = (sanitized & cmd::TCON_R0HW) == 0;
+  status.terminalA = (sanitized & cmd::TCON_R0A) != 0;
+  status.terminalW = (sanitized & cmd::TCON_R0W) != 0;
+  status.terminalB = (sanitized & cmd::TCON_R0B) != 0;
+
+  const uint8_t implemented = static_cast<uint8_t>(sanitized & cmd::TCON_IMPLEMENTED_MASK);
+  switch (implemented) {
+    case cmd::TCON_IMPLEMENTED_MASK:
+      status.mode = TerminalMode::Potentiometer;
+      break;
+    case static_cast<uint8_t>(cmd::TCON_R0B | cmd::TCON_R0W | cmd::TCON_R0HW):
+      status.mode = TerminalMode::RheostatBToW;
+      break;
+    case static_cast<uint8_t>(cmd::TCON_R0A | cmd::TCON_R0W | cmd::TCON_R0HW):
+      status.mode = TerminalMode::RheostatAToW;
+      break;
+    case static_cast<uint8_t>(cmd::TCON_R0A | cmd::TCON_R0B | cmd::TCON_R0HW):
+      status.mode = TerminalMode::WiperFloating;
+      break;
+    default:
+      status.mode = status.softwareShutdown ? TerminalMode::Shutdown
+                                            : TerminalMode::Potentiometer;
+      break;
+  }
+  return status;
 }
 
 void MCP45HVX1::_syncRegister(uint8_t reg, uint8_t value) {
@@ -760,6 +915,35 @@ Status MCP45HVX1::_updateHealth(const Status& st) {
   return st;
 }
 
+Status MCP45HVX1::_recordFailure(const Status& st) {
+  if (st.ok() || st.inProgress()) {
+    return st;
+  }
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
+      st.code == Err::NOT_INITIALIZED || st.code == Err::UNSUPPORTED) {
+    return st;
+  }
+
+  const uint32_t now = _nowMs();
+  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
+  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
+
+  _lastError = st;
+  _lastErrorMs = now;
+  if (_totalFailures < maxU32) {
+    _totalFailures++;
+  }
+  if (_consecutiveFailures < maxU8) {
+    _consecutiveFailures++;
+  }
+  if (_consecutiveFailures >= _config.offlineThreshold) {
+    _driverState = DriverState::OFFLINE;
+  } else {
+    _driverState = DriverState::DEGRADED;
+  }
+  return st;
+}
+
 uint32_t MCP45HVX1::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
@@ -768,4 +952,3 @@ uint32_t MCP45HVX1::_nowMs() const {
 }
 
 }  // namespace MCP45HVX1
-

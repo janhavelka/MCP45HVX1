@@ -90,6 +90,8 @@ static constexpr uint8_t TCON_R0A = 0x04;
 static constexpr uint8_t TCON_R0W = 0x02;
 static constexpr uint8_t TCON_R0B = 0x01;
 static constexpr uint8_t TCON_TERMINAL_MASK = static_cast<uint8_t>(TCON_R0A | TCON_R0W | TCON_R0B);
+static constexpr uint8_t TCON_IMPLEMENTED_MASK =
+    static_cast<uint8_t>(TCON_R0HW | TCON_TERMINAL_MASK);
 static constexpr uint8_t TCON_SHUTDOWN = static_cast<uint8_t>(TCON_RESERVED_MASK | TCON_TERMINAL_MASK);
 static constexpr uint8_t TCON_POTENTIOMETER = TCON_DEFAULT;
 static constexpr uint8_t TCON_RHEOSTAT_B_TO_W =
@@ -113,4 +115,3 @@ static constexpr uint8_t GC_DECREMENT_WIPER0 = 0x88;
 
 }  // namespace cmd
 }  // namespace MCP45HVX1
-

@@ -42,6 +42,27 @@ struct RegisterSnapshot {
   uint8_t tcon = 0;  ///< Volatile TCON0 register
 };
 
+/// Decoded terminal-control register fields.
+struct TerminalStatus {
+  bool softwareShutdown = false; ///< true when R0HW=0
+  bool terminalA = false;        ///< P0A connection bit
+  bool terminalW = false;        ///< P0W connection bit
+  bool terminalB = false;        ///< P0B connection bit
+  TerminalMode mode = TerminalMode::Potentiometer; ///< Best-fit decoded mode
+};
+
+/// Static device/configuration information derived from Config.
+struct DeviceInfo {
+  uint8_t i2cAddress = cmd::DEFAULT_ADDRESS;
+  Resolution resolution = Resolution::Bits8;
+  ResistanceOption resistance = ResistanceOption::R10K;
+  uint8_t maxWiperCode = cmd::WIPER_MAX_8BIT;
+  uint8_t defaultWiperCode = cmd::WIPER_DEFAULT_8BIT;
+  uint16_t nominalResistanceOhms = 10000;
+  float nominalStepOhms = 0.0f;
+  bool usingAlternateAddressRange = false;
+};
+
 /// Snapshot of the current driver settings and health state.
 struct SettingsSnapshot {
   Config config;                 ///< Active runtime configuration snapshot
@@ -89,6 +110,16 @@ public:
   /// Attempt to recover from DEGRADED/OFFLINE state by tracked register reads.
   Status recover();
 
+  /// Run the optional board-provided I2C bus/software-reset callback.
+  /// This resets only the I2C interface state, not Wiper/TCON registers.
+  Status resetI2cState();
+
+  /// Restore documented POR/BOR volatile register defaults for the configured resolution.
+  Status restorePowerOnDefaults();
+
+  /// Backward-friendly alias for restorePowerOnDefaults().
+  Status resetToDefaults() { return restorePowerOnDefaults(); }
+
   // =========================================================================
   // Driver State
   // =========================================================================
@@ -100,6 +131,7 @@ public:
   }
   const Config& getConfig() const { return _config; }
   SettingsSnapshot getSettings() const;
+  DeviceInfo getDeviceInfo() const;
 
   // =========================================================================
   // Health Tracking
@@ -134,6 +166,12 @@ public:
   /// Convert a wiper code to normalized 0.0-1.0 position.
   static float fractionFromCode(uint8_t code, Resolution resolution);
 
+  /// Read volatile Wiper 0 as a normalized 0.0-1.0 position.
+  Status readWiperFraction(float& fraction);
+
+  /// Write volatile Wiper 0 from a normalized 0.0-1.0 position.
+  Status writeWiperFraction(float fraction);
+
   /// Maximum valid wiper code for a resolution.
   static constexpr uint8_t maxWiperCode(Resolution resolution) {
     return resolution == Resolution::Bits7 ? cmd::WIPER_MAX_7BIT : cmd::WIPER_MAX_8BIT;
@@ -143,6 +181,24 @@ public:
   static constexpr uint8_t defaultWiperCode(Resolution resolution) {
     return resolution == Resolution::Bits7 ? cmd::WIPER_DEFAULT_7BIT : cmd::WIPER_DEFAULT_8BIT;
   }
+
+  /// Nominal end-to-end resistance in ohms for an ordering option.
+  static constexpr uint16_t nominalResistanceOhms(ResistanceOption option) {
+    return option == ResistanceOption::R5K
+               ? 5000
+               : (option == ResistanceOption::R10K
+                      ? 10000
+                      : (option == ResistanceOption::R50K ? 50000 : 100000));
+  }
+
+  /// Ideal step resistance in ohms. Excludes tolerance, wiper resistance, INL/DNL, and leakage.
+  static float stepResistanceOhms(ResistanceOption option, Resolution resolution);
+
+  /// Ideal B-to-W resistance in ohms for a wiper code.
+  static float resistanceBToWOhms(uint8_t code, ResistanceOption option, Resolution resolution);
+
+  /// Ideal A-to-W resistance in ohms for a wiper code.
+  static float resistanceAToWOhms(uint8_t code, ResistanceOption option, Resolution resolution);
 
   // =========================================================================
   // Terminal Control API
@@ -169,6 +225,12 @@ public:
   /// Apply a common terminal connection preset.
   Status setTerminalMode(TerminalMode mode);
 
+  /// Decode the current TCON0 register into a terminal mode.
+  Status getTerminalMode(TerminalMode& mode);
+
+  /// Read and decode TCON0.
+  Status readTerminalStatus(TerminalStatus& status);
+
   /// Read both implemented registers in sequence.
   Status readSnapshot(RegisterSnapshot& snapshot);
 
@@ -176,6 +238,9 @@ public:
   static constexpr uint8_t sanitizeTcon(uint8_t value) {
     return static_cast<uint8_t>(value | cmd::TCON_RESERVED_MASK);
   }
+
+  /// Decode a sanitized TCON value.
+  static TerminalStatus decodeTcon(uint8_t value);
 
   // =========================================================================
   // Register Access (Direct)
@@ -223,6 +288,8 @@ private:
 
   // Validation and state helpers
   static bool _isValidAddress(uint8_t address);
+  static bool _isPrimaryAddress(uint8_t address);
+  static bool _isAlternateAddress(uint8_t address);
   static bool _isValidRegister(uint8_t reg);
   static bool _isWritableRegister(uint8_t reg);
   static bool _isValidWiperCode(uint8_t code, Resolution resolution);
@@ -233,6 +300,7 @@ private:
 
   // Health management
   Status _updateHealth(const Status& st);
+  Status _recordFailure(const Status& st);
   uint32_t _nowMs() const;
 
   Config _config;
@@ -255,4 +323,3 @@ private:
 };
 
 }  // namespace MCP45HVX1
-
