@@ -1,0 +1,49 @@
+{
+  "name": "MCP45HVX1",
+  "version": "1.0.0",
+  "description": "Production-grade MCP45HVX1 high-voltage I2C digital potentiometer driver.",
+  "keywords": [
+    "mcp45hvx1",
+    "mcp45hv31",
+    "mcp45hv51",
+    "digital-potentiometer",
+    "digipot",
+    "i2c",
+    "esp32",
+    "arduino",
+    "platformio"
+  ],
+  "authors": [
+    {
+      "name": "Thymos Solution s.r.o",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz"
+    },
+    {
+      "name": "Jan Havelka",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz",
+      "maintainer": true
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/janhavelka/MCP45HVX1.git"
+  },
+  "license": "MIT",
+  "homepage": "https://www.thymos.cz",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "headers": [
+    "MCP45HVX1/MCP45HVX1.h"
+  ],
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src"
+  }
+}
+
