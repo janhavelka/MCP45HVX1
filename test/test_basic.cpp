@@ -16,6 +16,8 @@ using namespace MCP45HVX1;
 
 namespace {
 
+using Driver = ::MCP45HVX1::MCP45HVX1;
+
 struct FakeBus {
   static constexpr size_t MAX_LOG = 16;
 
@@ -75,7 +77,7 @@ bool isValidFakeReg(uint8_t reg) {
 }
 
 uint8_t maxCode(FakeBus* bus) {
-  return MCP45HVX1::maxWiperCode(bus->resolution);
+  return Driver::maxWiperCode(bus->resolution);
 }
 
 uint8_t readFakeReg(FakeBus* bus, uint8_t reg) {
@@ -102,7 +104,7 @@ Status applyCommand(FakeBus* bus, uint8_t commandByte, const uint8_t* data,
       if (reg == cmd::REG_WIPER0) {
         bus->wiper = data[index] > maxCode(bus) ? maxCode(bus) : data[index];
       } else {
-        bus->tcon = MCP45HVX1::sanitizeTcon(data[index]);
+        bus->tcon = Driver::sanitizeTcon(data[index]);
       }
       return Status::Ok();
 
@@ -147,7 +149,7 @@ Status applyGeneralCall(FakeBus* bus, const uint8_t* data, size_t len) {
       if (len < 2) {
         return Status::Error(Err::I2C_NACK_DATA, "missing GC TCON data");
       }
-      bus->tcon = MCP45HVX1::sanitizeTcon(data[1]);
+      bus->tcon = Driver::sanitizeTcon(data[1]);
       return Status::Ok();
     case cmd::GC_INCREMENT_WIPER0:
       if (bus->wiper < maxCode(bus)) {
@@ -301,7 +303,7 @@ void test_config_defaults() {
 }
 
 void test_begin_rejects_invalid_config() {
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg;
   Status st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
@@ -325,7 +327,7 @@ void test_begin_rejects_invalid_config() {
 
 void test_begin_accepts_documented_and_alternate_address_ranges() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.i2cAddress = 0x3F;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
@@ -346,7 +348,7 @@ void test_begin_reads_and_caches_registers() {
   FakeBus bus;
   bus.wiper = 0x42;
   bus.tcon = 0xFB;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   SettingsSnapshot s = dev.getSettings();
@@ -361,7 +363,7 @@ void test_begin_reads_and_caches_registers() {
 
 void test_device_info_and_resistance_helpers() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.resistance = ResistanceOption::R50K;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
@@ -377,36 +379,36 @@ void test_device_info_and_resistance_helpers() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 6.5f, info.maxTerminalCurrentMilliAmps);
 
   TEST_ASSERT_EQUAL_UINT32(10000u,
-                           MCP45HVX1::nominalResistanceOhms(ResistanceOption::R10K));
+                           Driver::nominalResistanceOhms(ResistanceOption::R10K));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f,
-                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R5K));
+                           Driver::maxTerminalCurrentMilliAmps(ResistanceOption::R5K));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f,
-                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R10K));
+                           Driver::maxTerminalCurrentMilliAmps(ResistanceOption::R10K));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 6.5f,
-                           MCP45HVX1::maxTerminalCurrentMilliAmps(ResistanceOption::R100K));
+                           Driver::maxTerminalCurrentMilliAmps(ResistanceOption::R100K));
   TEST_ASSERT_EQUAL_UINT32(100000u,
-                           MCP45HVX1::nominalResistanceOhms(ResistanceOption::R100K));
+                           Driver::nominalResistanceOhms(ResistanceOption::R100K));
   TEST_ASSERT_FLOAT_WITHIN(0.5f, 392.16f,
-                           MCP45HVX1::stepResistanceOhms(ResistanceOption::R100K,
+                           Driver::stepResistanceOhms(ResistanceOption::R100K,
                                                          Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(1.0f, 50196.0f,
-                           MCP45HVX1::resistanceBToWOhms(0x80, ResistanceOption::R100K,
+                           Driver::resistanceBToWOhms(0x80, ResistanceOption::R100K,
                                                          Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(0.1f, 39.22f,
-                           MCP45HVX1::stepResistanceOhms(ResistanceOption::R10K,
+                           Driver::stepResistanceOhms(ResistanceOption::R10K,
                                                          Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(1.0f, 5019.6f,
-                           MCP45HVX1::resistanceBToWOhms(0x80, ResistanceOption::R10K,
+                           Driver::resistanceBToWOhms(0x80, ResistanceOption::R10K,
                                                          Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(1.0f, 4980.4f,
-                           MCP45HVX1::resistanceAToWOhms(0x80, ResistanceOption::R10K,
+                           Driver::resistanceAToWOhms(0x80, ResistanceOption::R10K,
                                                          Resolution::Bits8));
 }
 
 void test_begin_require_power_on_defaults() {
   FakeBus bus;
   bus.wiper = 0x22;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.requirePowerOnDefaults = true;
   Status st = dev.begin(cfg);
@@ -416,7 +418,7 @@ void test_begin_require_power_on_defaults() {
 
 void test_begin_optional_initial_writes() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.writeInitialWiper = true;
   cfg.initialWiperCode = 0x20;
@@ -429,7 +431,7 @@ void test_begin_optional_initial_writes() {
 
 void test_read_write_wiper() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.writeWiper(0x80).ok());
@@ -443,7 +445,7 @@ void test_read_write_wiper() {
 
 void test_wire_protocol_frames() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   uint8_t value = 0;
@@ -482,7 +484,7 @@ void test_7bit_wiper_rejects_out_of_range() {
   FakeBus bus;
   bus.resolution = Resolution::Bits7;
   bus.wiper = cmd::WIPER_DEFAULT_7BIT;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   Status st = dev.writeWiper(0x80);
@@ -493,7 +495,7 @@ void test_7bit_wiper_rejects_out_of_range() {
 void test_increment_decrement_clamp_and_cache() {
   FakeBus bus;
   bus.wiper = 0xFE;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.incrementWiper(3).ok());
@@ -507,7 +509,7 @@ void test_increment_decrement_clamp_and_cache() {
 
 void test_tcon_write_sanitizes_reserved_bits() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.writeTcon(0x00).ok());
@@ -517,7 +519,7 @@ void test_tcon_write_sanitizes_reserved_bits() {
 
 void test_terminal_helpers() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.setTerminalEnabled(Terminal::A, false).ok());
@@ -549,7 +551,7 @@ void test_terminal_helpers() {
   TEST_ASSERT_TRUE(status.terminalW);
   TEST_ASSERT_FALSE(status.terminalB);
 
-  status = MCP45HVX1::decodeTcon(cmd::TCON_SHUTDOWN);
+  status = Driver::decodeTcon(cmd::TCON_SHUTDOWN);
   TEST_ASSERT_TRUE(status.softwareShutdown);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TerminalMode::Shutdown),
                           static_cast<uint8_t>(status.mode));
@@ -567,7 +569,7 @@ void test_terminal_helpers() {
 
 void test_direct_register_access_rejects_reserved() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   uint8_t value = 0;
@@ -581,7 +583,7 @@ void test_direct_register_access_rejects_reserved() {
 void test_read_last_address() {
   FakeBus bus;
   bus.wiper = 0x55;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.writeTcon(0xFB).ok());
@@ -594,7 +596,7 @@ void test_i2c_reset_and_restore_defaults() {
   FakeBus bus;
   bus.wiper = 0x11;
   bus.tcon = 0xF3;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.resetI2cState().ok());
@@ -608,7 +610,7 @@ void test_i2c_reset_and_restore_defaults() {
 
 void test_i2c_reset_reports_unsupported_without_callback() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.busReset = nullptr;
   cfg.controlUser = nullptr;
@@ -621,7 +623,7 @@ void test_i2c_reset_reports_unsupported_without_callback() {
 
 void test_general_call_helpers() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.generalCallWriteWiper(0x44).ok());
@@ -642,7 +644,7 @@ void test_general_call_helpers() {
   TEST_ASSERT_EQUAL_UINT32(4u, bus.generalCallWrites);
 
   bus.resolution = Resolution::Bits7;
-  MCP45HVX1::MCP45HVX1 dev7;
+  Driver dev7;
   TEST_ASSERT_TRUE(dev7.begin(makeConfig(bus)).ok());
   Status st = dev7.generalCallWriteWiper(0x80);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
@@ -650,7 +652,7 @@ void test_general_call_helpers() {
 
 void test_probe_does_not_update_health_but_recover_does() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.readErrorRemaining = 1;
@@ -671,7 +673,7 @@ void test_probe_does_not_update_health_but_recover_does() {
 
 void test_probe_preserves_register_mismatch() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.readMsb = 0x01;
@@ -683,7 +685,7 @@ void test_probe_preserves_register_mismatch() {
 
 void test_offline_threshold() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.offlineThreshold = 1;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
@@ -696,9 +698,79 @@ void test_offline_threshold() {
                           static_cast<uint8_t>(dev.state()));
 }
 
+void test_offline_blocks_normal_operations_without_bus_io() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  Status st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  const uint32_t readsAfterOffline = bus.readCalls;
+  const uint32_t writesAfterOffline = bus.writeCalls;
+
+  st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_STRING("Driver is offline; call recover()", st.msg);
+
+  st = dev.writeWiper(0x44);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  st = dev.incrementWiper();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  st = dev.readLastAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  st = dev.generalCallWriteWiper(0x44);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  st = dev.restorePowerOnDefaults();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(readsAfterOffline, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesAfterOffline, bus.writeCalls);
+}
+
+void test_recover_is_explicit_path_out_of_offline() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  TEST_ASSERT_FALSE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  const uint32_t readsAfterOffline = bus.readCalls;
+  const uint32_t resetsAfterOffline = bus.resetCalls;
+  TEST_ASSERT_TRUE(dev.resetI2cState().ok());
+  TEST_ASSERT_EQUAL_UINT32(resetsAfterOffline + 1u, bus.resetCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsAfterOffline, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.recover().ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterOffline + 2u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.writeWiper(0x22).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x22, bus.wiper);
+}
+
 void test_offline_threshold_zero_normalizes_to_one() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.offlineThreshold = 0;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
@@ -708,7 +780,7 @@ void test_offline_threshold_zero_normalizes_to_one() {
 void test_read_msb_mismatch_is_reported() {
   FakeBus bus;
   bus.readMsb = 0x01;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Status st = dev.begin(makeConfig(bus));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
                           static_cast<uint8_t>(st.code));
@@ -716,7 +788,7 @@ void test_read_msb_mismatch_is_reported() {
 
 void test_tracked_read_msb_mismatch_updates_health() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.readMsb = 0x01;
@@ -734,7 +806,7 @@ void test_tracked_read_msb_mismatch_updates_health() {
 void test_require_read_msb_zero_can_be_disabled() {
   FakeBus bus;
   bus.readMsb = 0x01;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   Config cfg = makeConfig(bus);
   cfg.requireReadMsbZero = false;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
@@ -745,7 +817,7 @@ void test_require_read_msb_zero_can_be_disabled() {
 
 void test_zero_step_commands_are_noops() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
   const uint32_t writesBefore = bus.writeCalls;
 
@@ -756,7 +828,7 @@ void test_zero_step_commands_are_noops() {
 
 void test_failed_bus_reset_updates_health() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.resetStatus = Status::Error(Err::I2C_BUS, "forced reset fail", -3);
@@ -768,15 +840,15 @@ void test_failed_bus_reset_updates_health() {
 }
 
 void test_conversions() {
-  TEST_ASSERT_EQUAL_HEX8(0x80, MCP45HVX1::codeFromFraction(0.5f, Resolution::Bits8));
-  TEST_ASSERT_EQUAL_HEX8(0x40, MCP45HVX1::codeFromFraction(0.5f, Resolution::Bits7));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, MCP45HVX1::fractionFromCode(0xFF, Resolution::Bits8));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, MCP45HVX1::fractionFromCode(0x7F, Resolution::Bits7));
+  TEST_ASSERT_EQUAL_HEX8(0x80, Driver::codeFromFraction(0.5f, Resolution::Bits8));
+  TEST_ASSERT_EQUAL_HEX8(0x40, Driver::codeFromFraction(0.5f, Resolution::Bits7));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0xFF, Resolution::Bits8));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0x7F, Resolution::Bits7));
 }
 
 void test_fraction_read_write_helpers() {
   FakeBus bus;
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.writeWiperFraction(0.5f).ok());
@@ -791,7 +863,7 @@ void test_fraction_read_write_helpers() {
 }
 
 void test_operations_reject_before_begin() {
-  MCP45HVX1::MCP45HVX1 dev;
+  Driver dev;
   uint8_t value = 0;
   bool flag = false;
   float fraction = 0.0f;
@@ -879,6 +951,8 @@ int main() {
   RUN_TEST(test_probe_does_not_update_health_but_recover_does);
   RUN_TEST(test_probe_preserves_register_mismatch);
   RUN_TEST(test_offline_threshold);
+  RUN_TEST(test_offline_blocks_normal_operations_without_bus_io);
+  RUN_TEST(test_recover_is_explicit_path_out_of_offline);
   RUN_TEST(test_offline_threshold_zero_normalizes_to_one);
   RUN_TEST(test_read_msb_mismatch_is_reported);
   RUN_TEST(test_tracked_read_msb_mismatch_updates_health);

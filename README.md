@@ -156,6 +156,26 @@ verify local state afterward.
 | `requireReadMsbZero` | `true` | Enforce documented read MSB byte `0x00` |
 | `offlineThreshold` | `5` | Consecutive tracked failures before OFFLINE |
 
+## Runtime Model
+
+The core driver is synchronous and transport-agnostic. It does not allocate heap
+memory or own an Arduino `Wire` instance; callers inject I2C callbacks through
+`Config`. Calls are not internally locked, so share one driver instance from a
+single task/thread at a time or serialize access in the application.
+
+The public API is not ISR-oriented. I2C transports, callbacks, and optional bus
+reset hooks are expected to run from normal task context where blocking I2C
+transactions and timeout handling are acceptable.
+
+Health tracking is latched at `DriverState::OFFLINE`: after the configured
+consecutive tracked-failure threshold is reached, normal public I2C operations
+return `Err::BUSY` with `Driver is offline; call recover()` and do not call the
+I2C transport. `probe()` may still perform a raw presence check without changing
+health counters. `resetI2cState()` may run the configured bus-reset callback but
+does not by itself mark the device recovered while already OFFLINE. Call
+`recover()` to perform tracked Wiper/TCON reads, refresh caches, and return to
+READY on success.
+
 ## Device Notes
 
 - The implemented registers are `0x00` Wiper 0 and `0x04` TCON0. All other
@@ -175,6 +195,11 @@ DS20005304B Rev B Table 6-2 and the official PDF text give fixed address bits
 `0x5C-0x5F` conflict from command figures. The driver defaults to `0x3C` and
 accepts `0x5C-0x5F` only when `Config::allowAlternateAddressRange` is explicitly
 enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
+
+Hardware validation should verify the populated A1/A0 address, the WLAT and SHDN
+board strap behavior, General Call enablement, and the analog terminal limits for
+the selected RAB option. The helper math is idealized and does not include
+tolerance, wiper resistance, leakage, INL/DNL, or board-level loading.
 
 ## Examples
 

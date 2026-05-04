@@ -200,11 +200,20 @@ Status MCP45HVX1::recover() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  RegisterSnapshot snapshot;
-  Status st = readSnapshot(snapshot);
+  uint8_t wiper = 0;
+  Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
   if (!st.ok()) {
     return st;
   }
+  _syncRegister(cmd::REG_WIPER0, wiper);
+
+  uint8_t tcon = 0;
+  st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+  if (!st.ok()) {
+    return st;
+  }
+  _syncRegister(cmd::REG_TCON0, tcon);
+
   return Status::Ok();
 }
 
@@ -216,6 +225,7 @@ Status MCP45HVX1::resetI2cState() {
     return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
 
+  const bool wasOffline = _driverState == DriverState::OFFLINE;
   Status st = _config.busReset(_config.controlUser);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
       st.code == Err::UNSUPPORTED) {
@@ -227,6 +237,9 @@ Status MCP45HVX1::resetI2cState() {
 
   _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
+  if (wasOffline) {
+    return st;
+  }
   return _updateHealth(st);
 }
 
@@ -467,6 +480,9 @@ Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
   if (!_isValidRegister(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Register address is reserved");
   }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
 
   Status st = _readRegisterTracked(reg, value);
   if (!st.ok()) {
@@ -486,6 +502,9 @@ Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
   if (reg == cmd::REG_WIPER0 && !_isValidWiperCode(value, _config.resolution)) {
     return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", value);
   }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
 
   const uint8_t sanitized = (reg == cmd::REG_TCON0) ? sanitizeTcon(value) : value;
   Status st = _writeRegisterTracked(reg, sanitized);
@@ -499,6 +518,9 @@ Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
 Status MCP45HVX1::readLastAddress(uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
   }
   return _readLastAddressTracked(value);
 }
@@ -727,6 +749,9 @@ Status MCP45HVX1::_sendWiperStepCommand(cmd::Command command, uint8_t steps) {
   if (command != cmd::Command::Increment && command != cmd::Command::Decrement) {
     return Status::Error(Err::INVALID_PARAM, "Invalid wiper step command");
   }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
   if (steps == 0) {
     return Status::Ok();
   }
@@ -766,6 +791,9 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
   }
   if (len > 1) {
     return Status::Error(Err::INVALID_PARAM, "General Call payload too long");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
   }
 
   uint8_t payload[2] = {commandByte, 0};
@@ -890,6 +918,10 @@ void MCP45HVX1::_clearCachedRegisters() {
 // ===========================================================================
 // Health Management
 // ===========================================================================
+
+Status MCP45HVX1::_offlineStatus() const {
+  return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+}
 
 Status MCP45HVX1::_updateHealth(const Status& st) {
   if (!_initialized) {
