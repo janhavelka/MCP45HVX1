@@ -200,9 +200,13 @@ Status MCP45HVX1::recover() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
+  const bool startedOffline = _driverState == DriverState::OFFLINE;
   uint8_t wiper = 0;
   Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
   if (!st.ok()) {
+    if (startedOffline) {
+      _reassertOfflineLatch();
+    }
     return st;
   }
   _syncRegister(cmd::REG_WIPER0, wiper);
@@ -210,6 +214,9 @@ Status MCP45HVX1::recover() {
   uint8_t tcon = 0;
   st = _readRegisterTracked(cmd::REG_TCON0, tcon);
   if (!st.ok()) {
+    if (startedOffline) {
+      _reassertOfflineLatch();
+    }
     return st;
   }
   _syncRegister(cmd::REG_TCON0, tcon);
@@ -225,7 +232,7 @@ Status MCP45HVX1::resetI2cState() {
     return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
 
-  const bool wasOffline = _driverState == DriverState::OFFLINE;
+  const bool startedOffline = _driverState == DriverState::OFFLINE;
   Status st = _config.busReset(_config.controlUser);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
       st.code == Err::UNSUPPORTED) {
@@ -237,7 +244,7 @@ Status MCP45HVX1::resetI2cState() {
 
   _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
-  if (wasOffline) {
+  if (startedOffline) {
     return st;
   }
   return _updateHealth(st);
@@ -921,6 +928,14 @@ void MCP45HVX1::_clearCachedRegisters() {
 
 Status MCP45HVX1::_offlineStatus() const {
   return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+}
+
+void MCP45HVX1::_reassertOfflineLatch() {
+  _driverState = DriverState::OFFLINE;
+  const uint8_t threshold = _config.offlineThreshold == 0 ? 1 : _config.offlineThreshold;
+  if (_consecutiveFailures < threshold) {
+    _consecutiveFailures = threshold;
+  }
 }
 
 Status MCP45HVX1::_updateHealth(const Status& st) {

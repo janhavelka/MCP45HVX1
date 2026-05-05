@@ -314,6 +314,7 @@ private:
 
   // Health management
   Status _offlineStatus() const;
+  void _reassertOfflineLatch();
   Status _updateHealth(const Status& st);
   Status _recordFailure(const Status& st);
   uint32_t _nowMs() const;

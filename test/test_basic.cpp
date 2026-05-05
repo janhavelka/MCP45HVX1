@@ -45,6 +45,7 @@ struct FakeBus {
 
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
+  uint32_t failReadCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
   Status resetStatus = Status::Ok();
@@ -198,6 +199,10 @@ Status fakeWriteRead(uint8_t addr, const uint8_t* txData, size_t txLen, uint8_t*
   bus->readCalls++;
   if ((txLen > 0 && txData == nullptr) || rxData == nullptr || rxLen == 0) {
     return Status::Error(Err::INVALID_PARAM, "invalid fake write-read args");
+  }
+  if (bus->failReadCall != 0U && bus->readCalls == bus->failReadCall) {
+    bus->failReadCall = 0;
+    return bus->readError;
   }
   if (bus->readErrorRemaining > 0) {
     bus->readErrorRemaining--;
@@ -768,6 +773,39 @@ void test_recover_is_explicit_path_out_of_offline() {
   TEST_ASSERT_EQUAL_HEX8(0x22, bus.wiper);
 }
 
+void test_failed_recover_from_offline_reasserts_latch_after_partial_success() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 3;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = cfg.offlineThreshold;
+  uint8_t value = 0;
+  for (uint8_t i = 0; i < cfg.offlineThreshold; ++i) {
+    Status st = dev.readWiper(value);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                            static_cast<uint8_t>(st.code));
+  }
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_TRUE(dev.consecutiveFailures() >= cfg.offlineThreshold);
+
+  bus.failReadCall = bus.readCalls + 2U;
+  Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_TRUE(dev.consecutiveFailures() >= cfg.offlineThreshold);
+
+  const uint32_t readsAfterRecover = bus.readCalls;
+  st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsAfterRecover, bus.readCalls);
+}
+
 void test_offline_threshold_zero_normalizes_to_one() {
   FakeBus bus;
   Driver dev;
@@ -953,6 +991,7 @@ int main() {
   RUN_TEST(test_offline_threshold);
   RUN_TEST(test_offline_blocks_normal_operations_without_bus_io);
   RUN_TEST(test_recover_is_explicit_path_out_of_offline);
+  RUN_TEST(test_failed_recover_from_offline_reasserts_latch_after_partial_success);
   RUN_TEST(test_offline_threshold_zero_normalizes_to_one);
   RUN_TEST(test_read_msb_mismatch_is_reported);
   RUN_TEST(test_tracked_read_msb_mismatch_updates_health);
