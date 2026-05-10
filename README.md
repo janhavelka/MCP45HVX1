@@ -243,12 +243,12 @@ python scripts/generate_version.py check
 
 - [Assumptions](ASSUMPTIONS.md)
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
-- [Register Map](docs/05_register_map.md)
-- [Driver Register Reference](docs/register_reference.md)
-- [Hardware Validation Checklist](docs/hardware_validation.md)
-- [Protocol Commands](docs/04_protocol_commands_and_transactions.md)
-- [Initialization Notes](docs/07_initialization_reset_and_operational_notes.md)
-- [Release Notes v1.0.0](docs/releases/v1.0.0.md)
+- <a href="docs/05_register_map.md">Register Map</a>
+- <a href="docs/register_reference.md">Driver Register Reference</a>
+- <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
+- <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
+- <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
+- <a href="docs/releases/v1.0.0.md">Release Notes v1.0.0</a>
 
 ## License
 

@@ -344,6 +344,23 @@ void printDeviceInfo() {
   LOG_SERIAL.println();
 }
 
+void printErrataInfo() {
+  const MCP45HVX1::SiliconErrataInfo info =
+      MCP45HVX1::MCP45HVX1::siliconErrataInfo();
+
+  LOG_SERIAL.printf("errata=%s rev=%s\n", info.documentNumber, info.documentRevision);
+  LOG_SERIAL.printf("title=%s\n", info.documentTitle);
+  LOG_SERIAL.printf("marking=%s\n", info.markingSummary);
+  LOG_SERIAL.printf("shared-bus-i2c-hazard=%s\n", log_bool_str(info.sharedBusI2cHazard));
+  LOG_SERIAL.printf("general-call-address-decode-hazard=%s\n",
+                    log_bool_str(info.generalCallAddressDecodeHazard));
+  LOG_SERIAL.printf("hardware-general-call-bit-ignored=%s\n",
+                    log_bool_str(info.hardwareGeneralCallBitIgnored));
+  LOG_SERIAL.printf("unique-bus-workaround-for-affected-silicon=%s\n",
+                    log_bool_str(info.uniqueBusWorkaroundForAffectedSilicon));
+  LOG_SERIAL.println("source=docs/MCP45HVX1_Errata_DS80000649B.pdf");
+}
+
 void printTerminalStatus(uint8_t tcon) {
   const MCP45HVX1::TerminalStatus s = MCP45HVX1::MCP45HVX1::decodeTcon(tcon);
   LOG_SERIAL.printf("tcon=0x%02X mode=%s shdn=%s A=%s W=%s B=%s\n",
@@ -425,6 +442,7 @@ void printHelp() {
   cli::printHelpItem("cfg | settings", "Print config, cache, and health");
   cli::printHelpItem("drv", "Print compact health line");
   cli::printHelpItem("info", "Print variant/resistance helper info");
+  cli::printHelpItem("errata", "Print DS80000649B I2C errata cautions");
   cli::printHelpItem("selftest", "Probe, read, and decode all practical state");
   cli::printHelpItem("stress [n]", "Run inc/dec exercise and restore state");
   cli::printHelpItem("stress_mix [n]", "Exercise writes/modes and restore state");
@@ -724,6 +742,7 @@ void handleGeneralCall(const char* args) {
     if (noMoreArgs(p)) {
       gGeneralCallArmed = true;
       LOGW("General Call armed for one broadcast command; it affects every enabled device");
+      LOGW("DS80000649B: affected silicon has General Call decode anomalies");
     } else {
       LOGE("usage: gc arm");
       gGeneralCallArmed = false;
@@ -927,6 +946,8 @@ void handleCommand(String line) {
     if (requireNoArgs(command, p)) health_view::printSummary(gDev);
   } else if (strcmp(command, "info") == 0) {
     if (requireNoArgs(command, p)) printDeviceInfo();
+  } else if (strcmp(command, "errata") == 0) {
+    if (requireNoArgs(command, p)) printErrataInfo();
   } else if (strcmp(command, "selftest") == 0) {
     if (requireNoArgs(command, p)) runSelfTest();
   } else if (strcmp(command, "stress") == 0) {

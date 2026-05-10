@@ -28,7 +28,14 @@ inline const char* resistanceName(MCP45HVX1::ResistanceOption option) {
 }
 
 inline void printSettings(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
-  const MCP45HVX1::SettingsSnapshot s = dev.getSettings();
+  MCP45HVX1::SettingsSnapshot s;
+  const MCP45HVX1::Status st = dev.getSettings(s);
+  if (!st.ok()) {
+    out.printf("settings: error=%u detail=%ld\n",
+               static_cast<unsigned>(st.code),
+               static_cast<long>(st.detail));
+    return;
+  }
   const MCP45HVX1::DeviceInfo info = dev.getDeviceInfo();
   out.printf("Driver: %s initialized=%s online=%s\n",
              health_view::stateName(s.state),

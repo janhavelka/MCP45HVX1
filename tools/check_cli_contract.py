@@ -40,6 +40,7 @@ MANDATORY_COMMANDS = [
     "cfg",
     "settings",
     "info",
+    "errata",
     "read",
     "rregs",
     "dump",

@@ -580,4 +580,4 @@
 
 The MCP45HVX1 Typical Performance Curves are in a **separate document, DS20005307**, available on the Microchip web site at the MCP45HVX1 Product Page under Documentation and Software, in the Data Sheets category. [Source: DS20005304B, p.22]
 
-> **Gap:** DS20005307 (`typical_curves.pdf`) was not read during this extraction. Typical performance curves are not available in this document set.
+Raw text is now available in `extracted-md/MCP45HVX1_Typical_Performance_Curves_DS20005307A.md` from `MCP45HVX1_Typical_Performance_Curves_DS20005307A.pdf`. The source is graph-heavy, so numerical curve interpretation still requires direct PDF review rather than relying on the raw text extraction alone.

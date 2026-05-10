@@ -44,6 +44,22 @@ Status MCP45HVX1::begin(const Config& config) {
   _addressPointerKnown = true;
   _addressPointer = cmd::REG_WIPER0;
 
+  auto resetAfterFailedBegin = [this](Status failure) -> Status {
+    _config = Config{};
+    _initialized = false;
+    _driverState = DriverState::UNINIT;
+    _lastOkMs = 0;
+    _lastErrorMs = 0;
+    _lastError = Status::Ok();
+    _consecutiveFailures = 0;
+    _totalFailures = 0;
+    _totalSuccess = 0;
+    _clearCachedRegisters();
+    _addressPointerKnown = true;
+    _addressPointer = cmd::REG_WIPER0;
+    return failure;
+  };
+
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
   }
@@ -74,26 +90,30 @@ Status MCP45HVX1::begin(const Config& config) {
   Status st = _readRegisterRaw(cmd::REG_WIPER0, wiper);
   if (!st.ok()) {
     if (st.code == Err::REGISTER_MISMATCH) {
-      return st;
+      return resetAfterFailedBegin(st);
     }
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return resetAfterFailedBegin(
+        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
   }
 
   uint8_t tcon = 0;
   st = _readRegisterRaw(cmd::REG_TCON0, tcon);
   if (!st.ok()) {
     if (st.code == Err::REGISTER_MISMATCH) {
-      return st;
+      return resetAfterFailedBegin(st);
     }
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return resetAfterFailedBegin(
+        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
   }
 
   if (_config.requirePowerOnDefaults) {
     if (wiper != defaultWiperCode(_config.resolution)) {
-      return Status::Error(Err::REGISTER_MISMATCH, "Wiper not at POR/BOR default", wiper);
+      return resetAfterFailedBegin(
+          Status::Error(Err::REGISTER_MISMATCH, "Wiper not at POR/BOR default", wiper));
     }
     if (tcon != cmd::TCON_DEFAULT) {
-      return Status::Error(Err::REGISTER_MISMATCH, "TCON not at POR/BOR default", tcon);
+      return resetAfterFailedBegin(
+          Status::Error(Err::REGISTER_MISMATCH, "TCON not at POR/BOR default", tcon));
     }
   }
 
@@ -103,7 +123,7 @@ Status MCP45HVX1::begin(const Config& config) {
   if (_config.writeInitialTcon) {
     st = _writeRegisterRaw(cmd::REG_TCON0, _config.initialTcon);
     if (!st.ok()) {
-      return st;
+      return resetAfterFailedBegin(st);
     }
     _syncRegister(cmd::REG_TCON0, sanitizeTcon(_config.initialTcon));
   }
@@ -111,7 +131,7 @@ Status MCP45HVX1::begin(const Config& config) {
   if (_config.writeInitialWiper) {
     st = _writeRegisterRaw(cmd::REG_WIPER0, _config.initialWiperCode);
     if (!st.ok()) {
-      return st;
+      return resetAfterFailedBegin(st);
     }
     _syncRegister(cmd::REG_WIPER0, _config.initialWiperCode);
   }
@@ -143,22 +163,27 @@ void MCP45HVX1::end() {
 
 SettingsSnapshot MCP45HVX1::getSettings() const {
   SettingsSnapshot snapshot;
-  snapshot.config = _config;
-  snapshot.state = _driverState;
-  snapshot.initialized = _initialized;
-  snapshot.lastOkMs = _lastOkMs;
-  snapshot.lastErrorMs = _lastErrorMs;
-  snapshot.lastError = _lastError;
-  snapshot.consecutiveFailures = _consecutiveFailures;
-  snapshot.totalFailures = _totalFailures;
-  snapshot.totalSuccess = _totalSuccess;
-  snapshot.cachedWiperKnown = _cachedWiperKnown;
-  snapshot.cachedWiper = _cachedWiper;
-  snapshot.cachedTconKnown = _cachedTconKnown;
-  snapshot.cachedTcon = _cachedTcon;
-  snapshot.addressPointerKnown = _addressPointerKnown;
-  snapshot.addressPointer = _addressPointer;
+  (void)getSettings(snapshot);
   return snapshot;
+}
+
+Status MCP45HVX1::getSettings(SettingsSnapshot& out) const {
+  out.config = _config;
+  out.state = _driverState;
+  out.initialized = _initialized;
+  out.lastOkMs = _lastOkMs;
+  out.lastErrorMs = _lastErrorMs;
+  out.lastError = _lastError;
+  out.consecutiveFailures = _consecutiveFailures;
+  out.totalFailures = _totalFailures;
+  out.totalSuccess = _totalSuccess;
+  out.cachedWiperKnown = _cachedWiperKnown;
+  out.cachedWiper = _cachedWiper;
+  out.cachedTconKnown = _cachedTconKnown;
+  out.cachedTcon = _cachedTcon;
+  out.addressPointerKnown = _addressPointerKnown;
+  out.addressPointer = _addressPointer;
+  return Status::Ok();
 }
 
 DeviceInfo MCP45HVX1::getDeviceInfo() const {

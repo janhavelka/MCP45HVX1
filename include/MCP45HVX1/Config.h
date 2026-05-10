@@ -1,5 +1,5 @@
 /// @file Config.h
-/// @brief Configuration structure for MCP45HVX1 driver
+/// @brief Transport callbacks and runtime configuration for MCP45HVX1.
 #pragma once
 
 #include <cstddef>
@@ -10,13 +10,29 @@
 namespace MCP45HVX1 {
 
 /// I2C write callback signature.
+///
+/// @param addr 7-bit I2C address.
+/// @param data Bytes to write. May be null only when len is zero.
+/// @param len Number of bytes to write.
+/// @param timeoutMs Transaction timeout in milliseconds.
+/// @param user User context from Config::i2cUser.
+/// @return Status::Ok() when the transfer is ACKed.
 using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
                               uint32_t timeoutMs, void* user);
 
 /// I2C write-then-read callback signature.
 ///
-/// txData may be null only when txLen == 0. A zero-length TX phase is used for
+/// txData may be null only when txLen is zero. A zero-length TX phase is used for
 /// the MCP45HVX1 documented "last address" read format.
+///
+/// @param addr 7-bit I2C address.
+/// @param txData Optional write phase bytes.
+/// @param txLen Number of write phase bytes.
+/// @param rxData Receive buffer. May be null only when rxLen is zero.
+/// @param rxLen Number of bytes to read.
+/// @param timeoutMs Transaction timeout in milliseconds.
+/// @param user User context from Config::i2cUser.
+/// @return Status::Ok() when the combined transfer succeeds.
 using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
                                   uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
                                   void* user);
@@ -26,9 +42,15 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
 /// Use this for the datasheet software reset sequence (Start, nine '1' bits,
 /// Start, Stop) or an equivalent bus-release implementation. The core driver
 /// cannot bit-bang SCL/SDA because it is intentionally board-agnostic.
+///
+/// @param user User context from Config::controlUser.
+/// @return Status::Ok() when the bus-reset sequence completes.
 using BusResetFn = Status (*)(void* user);
 
 /// Millisecond timestamp callback.
+///
+/// @param user User context from Config::timeUser.
+/// @return Monotonic milliseconds used for health timestamps.
 using NowMsFn = uint32_t (*)(void* user);
 
 /// MCP45HVX1 wiper resolution variant.
@@ -45,7 +67,11 @@ enum class ResistanceOption : uint8_t {
   R100K   ///< -104, nominal 100 kOhm
 };
 
-/// Configuration for MCP45HVX1 driver.
+/// Configuration for an MCP45HVX1 driver instance.
+///
+/// The core driver never accesses Arduino Wire directly. All bus operations go
+/// through the callbacks stored here so the same driver can be used from tests,
+/// Arduino examples, or another RTOS transport.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer

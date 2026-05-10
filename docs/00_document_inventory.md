@@ -11,28 +11,28 @@
 
 | File | Document Number | Type | Title / Description | Rev / Date | Status |
 |---|---|---|---|---|---|
-| `MCP45HVX1-Data-Sheet-DS20005304.pdf` | DS20005304B | Primary Datasheet | Single 7-Bit/8-Bit HV I2C Digital Potentiometer | Rev B, June 2023 | **PRIMARY — all technical values authoritative** |
-| `MCP45HVX1_datasheet.pdf` | DS20005304B (presumed duplicate) | Primary Datasheet | Same document, alternate filename | Rev B, June 2023 | Presumed duplicate of above; read via AllDatasheet HTML mirror |
-| `errata.pdf` | Unknown | Errata | Unknown Microchip errata document | Unknown | **NOT READ — AES-encrypted; no accessible HTML mirror found** |
-| `application_note_optimize_precision.pdf` | Likely DS00000691 (AN691) | Application Note | Optimizing Precision in Potentiometer-Based Systems | Unknown | **NOT READ** |
-| `application_note_optimize2.pdf` | Likely DS00000692 (AN692) | Application Note | Optimizing Precision (part 2) | Unknown | **NOT READ** |
-| `01080a.pdf` | DS00001080 (AN1080) | Application Note | Understanding Digital Potentiometers Resistor Variations | Rev A | **NOT READ** |
-| `00737c.pdf` | DS00000737 (AN737) | Application Note | Using Digital Potentiometers to Design Low-Pass Adjustable Filters | Rev C | **NOT READ** |
-| `00219.pdf` | DS00000219 (AN219) | Application Note | Comparing Digital Potentiometers to Mechanical Potentiometers | Rev — | **NOT READ** |
-| `Digital-Potentiometers-Design-Guide-Brochure-DS20002017.pdf` | DS20002017 | Design Guide / Brochure | Digital Potentiometers Design Guide | Unknown | **NOT READ** |
-| `typical_curves.pdf` | DS20005307 (presumed) | Typical Performance Curves | MCP45HVX1 Typical Performance Curves | Unknown | **NOT READ** |
+| `MCP45HVX1-Data-Sheet-DS20005304.pdf` | DS20005304B | Primary Datasheet | Single 7-Bit/8-Bit HV I2C Digital Potentiometer | Rev B, June 2023 | **PRIMARY — curated extraction and raw text available** |
+| `MCP45HVX1-Data-Sheet-DS20005304-Duplicate.pdf` | DS20005304B | Primary Datasheet | Duplicate copy of the primary datasheet | Rev B, June 2023 | Duplicate SHA256 of primary datasheet; raw extraction skipped |
+| `MCP45HVX1_Errata_DS80000649B.pdf` | DS80000649B | Errata | MCP45HVX1 Rev. A1 Silicon/Data Sheet Errata | Rev B, 2015 | Raw text extraction available |
+| `MCP45HVX1_Typical_Performance_Curves_DS20005307A.pdf` | DS20005307A | Typical Performance Curves | MCP45HVX1 Typical Performance Curves | Rev A, 2014 | Raw text extraction available; graph values require PDF review |
+| `Microchip_AN691_Optimizing_Digital_Potentiometer_Circuits.pdf` | DS00691A / AN691 | Application Note | Optimizing Digital Potentiometer Circuits to Reduce Absolute and Temperature Variations | Rev A, 2001 | Raw text extraction available |
+| `Microchip_AN692_Precision_Single_Supply_Photo_Detection.pdf` | DS00692B / AN692 | Application Note | Using a Digital Potentiometer to Optimize a Precision Single-Supply Photo Detection Circuit | Rev B, 2004 | Raw text extraction available |
+| `Microchip_AN1080_Digital_Potentiometer_Resistor_Variations.pdf` | DS01080A / AN1080 | Application Note | Understanding Digital Potentiometer Resistor Variations | Rev A, 2007 | Raw text extraction available |
+| `Microchip_AN737_Low_Pass_Adjustable_Filters.pdf` | DS00737C / AN737 | Application Note | Using Digital Potentiometers to Design Low-Pass Adjustable Filters | Rev C, 2004 | Raw text extraction available |
+| `Microchip_AN219_Comparing_Digital_Potentiometers_To_Mechanical_Potentiometers.pdf` | DS00219A / AN219 | Application Note | Comparing Digital Potentiometers to Mechanical Potentiometers | Rev A, 2000 | Raw text extraction available |
+| `Microchip_Digital_Potentiometers_Design_Guide_DS20002017.pdf` | DS20002017 | Design Guide / Brochure | Digital Potentiometers Design Guide | Current Microchip download | Raw text extraction available |
 
 ### 1.2 Reading Method
 
-All local PDF files are AES-V3 encrypted and unreadable by local tools. PowerShell 6+ (pwsh.exe) is not installed in the execution environment, so no local shell commands can be run. Content was obtained exclusively by fetching HTML-rendered pages from AllDatasheet.com:
-- URL pattern: `https://www.alldatasheet.com/html-pdf/2035345/MICROCHIP/MCP45HVX1/{OFFSET}/{PAGE}/MCP45HVX1.html`
-- Byte offset formula: `offset = 568 + (PAGE − 1) × 575`
-- All 102 pages of DS20005304B were fetched and read.
-- Supplemental documents (9 files listed above) were NOT accessible via AllDatasheet or other public HTML mirrors.
+The source PDFs in `docs/` were checked against official Microchip download URLs on 2026-05-09. The local SHA256 hashes matched the official downloads for the datasheet, errata, typical curves, application notes, and design guide.
+
+Raw text was extracted locally with `pypdf` into `docs/pdf-extracted-md/`. These raw extracts preserve page boundaries and are useful for search and traceability, but figures, graphs, equations, and dense tables still require checking against the original PDFs.
+
+The curated files `01_*.md` through `08_*.md` remain the driver-oriented extraction from DS20005304B Rev B. Supplemental PDF content is now available as raw text; it has not been fully re-integrated into every curated topic file.
 
 ### 1.3 Primary Document Determination
 
-DS20005304B is the sole normative source for all electrical, timing, protocol, register, and functional specifications. All values in this document set originate from DS20005304B unless a conflict note states otherwise. Supplemental documents are listed as **known unknown gaps**.
+DS20005304B is the sole normative source for all electrical, timing, protocol, register, and functional specifications unless a conflict note states otherwise. Supplemental documents are present for errata, characterization curves, and application guidance; their raw extracts should be reviewed before changing driver behavior.
 
 ---
 
@@ -71,10 +71,10 @@ DS20005304B is the sole normative source for all electrical, timing, protocol, r
 | Variant differences (7-bit vs 8-bit) | ✅ | DS20005304B multiple pages |
 | Package differences (TSSOP-14 vs VQFN-20) | ✅ | DS20005304B p.24, p.80–95 |
 | Packaging dimensions / land patterns | ✅ | DS20005304B p.80–95 |
-| Typical performance curves | ❌ | In DS20005307 (`typical_curves.pdf`) — NOT READ |
-| Errata | ❌ | In `errata.pdf` — NOT READ |
-| Application note content (AN691, AN692, AN1080, AN737, AN219) | ❌ | NOT READ |
-| Design guide content (DS20002017) | ❌ | NOT READ |
+| Typical performance curves | ⚠️ | Raw text extracted from `MCP45HVX1_Typical_Performance_Curves_DS20005307A.pdf`; graph interpretation still requires PDF review |
+| Errata | ✅ | Raw text extracted from `MCP45HVX1_Errata_DS80000649B.pdf` |
+| Application note content (AN691, AN692, AN1080, AN737, AN219) | ✅ | Raw text extracted under `docs/pdf-extracted-md/` |
+| Design guide content (DS20002017) | ✅ | Raw text extracted from `Microchip_Digital_Potentiometers_Design_Guide_DS20002017.pdf` |
 | Formulas / terminology | ✅ | DS20005304B Appendix B, p.96–98 |
 | Product identification system | ✅ | DS20005304B p.99–100 |
 
@@ -92,7 +92,7 @@ DS20005304B is the sole normative source for all electrical, timing, protocol, r
 | `05_register_map.md` | Memory map (00h–0Fh), Wiper 0 register (00h) full description, TCON0 register (04h) with all bit fields, reset values, access types, reserved address behavior |
 | `06_modes_interrupts_status_and_faults.md` | Hardware shutdown (SHDN pin), TCON software shutdown (R0HW/R0A/R0W/R0B), SHDN vs TCON interaction, WLAT latching behavior, terminal connection states, device current consumption modes, error/NACK conditions, GCEN bit |
 | `07_initialization_reset_and_operational_notes.md` | POR/BOR events (Tables 4-1 through 4-5), power-up sequencing rules, VL–V- delta requirement, software reset sequence (Section 8.2), WLAT usage, analog power design notes, bypass capacitor recommendations, level shifter requirement |
-| `08_variant_differences_and_open_questions.md` | MCP45HV31 vs MCP45HV51 differences, TSSOP-14 vs VQFN-20 differences, resistance-option differences, ordering/part-number system, custom options, known unknowns list (unread supplemental docs, missing data, ambiguities) |
+| `08_variant_differences_and_open_questions.md` | MCP45HV31 vs MCP45HV51 differences, TSSOP-14 vs VQFN-20 differences, resistance-option differences, ordering/part-number system, custom options, known ambiguities, and supplemental-document notes |
 
 ---
 
@@ -109,4 +109,4 @@ DS20005304B is the sole normative source for all electrical, timing, protocol, r
 
 ---
 
-*All extracted Markdown files in this set are based exclusively on DS20005304B Rev B (June 2023). No information has been invented, inferred from prior knowledge, or sourced from unread documents.*
+*The curated driver extraction files are based on DS20005304B Rev B (June 2023). Raw supplemental extractions are available under `docs/pdf-extracted-md/` for traceability and follow-up review.*

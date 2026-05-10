@@ -356,7 +356,8 @@ void test_begin_reads_and_caches_registers() {
   Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
-  SettingsSnapshot s = dev.getSettings();
+  SettingsSnapshot s;
+  TEST_ASSERT_TRUE(dev.getSettings(s).ok());
   TEST_ASSERT_TRUE(s.initialized);
   TEST_ASSERT_TRUE(s.cachedWiperKnown);
   TEST_ASSERT_TRUE(s.cachedTconKnown);
@@ -364,6 +365,10 @@ void test_begin_reads_and_caches_registers() {
   TEST_ASSERT_EQUAL_HEX8(0xFB, s.cachedTcon);
   TEST_ASSERT_EQUAL_UINT32(0u, s.totalSuccess);
   TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
+
+  const SettingsSnapshot byValue = dev.getSettings();
+  TEST_ASSERT_EQUAL_HEX8(s.cachedWiper, byValue.cachedWiper);
+  TEST_ASSERT_EQUAL_HEX8(s.cachedTcon, byValue.cachedTcon);
 }
 
 void test_device_info_and_resistance_helpers() {
@@ -410,6 +415,18 @@ void test_device_info_and_resistance_helpers() {
                                                          Resolution::Bits8));
 }
 
+void test_silicon_errata_info() {
+  const SiliconErrataInfo info = Driver::siliconErrataInfo();
+  TEST_ASSERT_EQUAL_STRING("DS80000649B", info.documentNumber);
+  TEST_ASSERT_EQUAL_STRING("B (July 2015)", info.documentRevision);
+  TEST_ASSERT_EQUAL_STRING("MCP45HVX1 Rev. A1 Silicon/Data Sheet Errata",
+                           info.documentTitle);
+  TEST_ASSERT_TRUE(info.sharedBusI2cHazard);
+  TEST_ASSERT_TRUE(info.generalCallAddressDecodeHazard);
+  TEST_ASSERT_TRUE(info.hardwareGeneralCallBitIgnored);
+  TEST_ASSERT_TRUE(info.uniqueBusWorkaroundForAffectedSilicon);
+}
+
 void test_begin_require_power_on_defaults() {
   FakeBus bus;
   bus.wiper = 0x22;
@@ -432,6 +449,66 @@ void test_begin_optional_initial_writes() {
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
   TEST_ASSERT_EQUAL_HEX8(0x20, bus.wiper);
   TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
+}
+
+void test_failed_begin_optional_write_clears_runtime_snapshot() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.i2cAddress = 0x3F;
+  cfg.writeInitialWiper = true;
+  cfg.initialWiperCode = 0x20;
+  cfg.writeInitialTcon = true;
+  cfg.initialTcon = 0x07;
+  bus.writeErrorRemaining = 1;
+
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.config.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.config.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.config.offlineThreshold);
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalFailures);
+  TEST_ASSERT_EQUAL_UINT8(0u, snap.consecutiveFailures);
+}
+
+void test_failed_begin_clears_stale_runtime_snapshot() {
+  FakeBus bus;
+  Driver dev;
+
+  Config good = makeConfig(bus);
+  good.i2cAddress = 0x3F;
+  good.initialWiperCode = 0x20;
+  TEST_ASSERT_TRUE(dev.begin(good).ok());
+  TEST_ASSERT_TRUE(dev.writeWiper(0x55).ok());
+
+  Config bad = makeConfig(bus);
+  bad.i2cWrite = nullptr;
+  bad.i2cWriteRead = nullptr;
+  Status st = dev.begin(bad);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.config.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.config.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.config.offlineThreshold);
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalFailures);
+  TEST_ASSERT_EQUAL_UINT8(0u, snap.consecutiveFailures);
 }
 
 void test_read_write_wiper() {
@@ -973,8 +1050,11 @@ int main() {
   RUN_TEST(test_begin_accepts_documented_and_alternate_address_ranges);
   RUN_TEST(test_begin_reads_and_caches_registers);
   RUN_TEST(test_device_info_and_resistance_helpers);
+  RUN_TEST(test_silicon_errata_info);
   RUN_TEST(test_begin_require_power_on_defaults);
   RUN_TEST(test_begin_optional_initial_writes);
+  RUN_TEST(test_failed_begin_optional_write_clears_runtime_snapshot);
+  RUN_TEST(test_failed_begin_clears_stale_runtime_snapshot);
   RUN_TEST(test_read_write_wiper);
   RUN_TEST(test_wire_protocol_frames);
   RUN_TEST(test_7bit_wiper_rejects_out_of_range);

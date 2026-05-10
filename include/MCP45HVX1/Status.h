@@ -1,5 +1,5 @@
 /// @file Status.h
-/// @brief Error codes and status handling for MCP45HVX1 driver
+/// @brief Error codes and status values returned by MCP45HVX1 operations.
 #pragma once
 
 #include <cstdint>
@@ -37,6 +37,9 @@ struct Status {
   constexpr Status() = default;
 
   /// Construct with explicit fields.
+  /// @param c Error code.
+  /// @param d Implementation-specific detail value.
+  /// @param m Static message string. The driver never takes ownership.
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
 
   /// @return true if operation succeeded.
@@ -46,13 +49,17 @@ struct Status {
   constexpr bool inProgress() const { return code == Err::IN_PROGRESS; }
 
   /// Create a success status.
+  /// @return Status with Err::OK and a static "OK" message.
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }
 
   /// Create an error status.
+  /// @param err Error code.
+  /// @param message Static error message string.
+  /// @param detailCode Optional implementation-specific detail.
+  /// @return Status with the provided error fields.
   static constexpr Status Error(Err err, const char* message, int32_t detailCode = 0) {
     return Status{err, detailCode, message};
   }
 };
 
 }  // namespace MCP45HVX1
-
