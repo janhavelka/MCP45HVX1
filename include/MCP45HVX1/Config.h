@@ -81,7 +81,7 @@ struct Config {
   void* controlUser = nullptr;           ///< User context for busReset
 
   // === Timing Hooks (optional) ===
-  NowMsFn nowMs = nullptr;               ///< Monotonic millisecond source
+  NowMsFn nowMs = nullptr;               ///< Monotonic millisecond source; falls back to the active platform timer when available
   void* timeUser = nullptr;              ///< User context for timing hook
 
   // === Device Settings ===

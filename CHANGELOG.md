@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- ESP-IDF component metadata and a pure ESP-IDF `examples/espidf_basic` build of
+  the full bring-up CLI.
+- `examples/common/IdfArduinoCompat.h` example shim that provides the small
+  Arduino surface used by the CLI while routing I2C through ESP-IDF v6
+  `i2c_master_*` APIs.
+- Core time fallback is now platform-aware: Arduino/native test builds use
+  `millis()`, while ESP-IDF builds use `esp_timer_get_time()`.
+- Example helpers now gate Arduino headers behind
+  `MCP45HVX1_EXAMPLE_PLATFORM_IDF` so the same CLI source can compile for both
+  frameworks.
+- `library.json` now declares both `arduino` and `espidf` framework support.
 - Latched `OFFLINE` behavior for normal public I2C operations. Once the health
   threshold is reached, normal operations return `BUSY` with
   `Driver is offline; call recover()` and do not touch the bus until

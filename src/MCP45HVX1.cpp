@@ -5,9 +5,31 @@
 
 #include "MCP45HVX1/MCP45HVX1.h"
 
-#include <Arduino.h>
 #include <cstring>
 #include <limits>
+
+#if defined(ARDUINO)
+#define MCP45HVX1_HAS_ARDUINO_TIME 1
+#elif !defined(ESP_PLATFORM) && defined(__has_include)
+#if __has_include(<Arduino.h>)
+#define MCP45HVX1_HAS_ARDUINO_TIME 1
+#endif
+#endif
+
+#ifndef MCP45HVX1_HAS_ARDUINO_TIME
+#define MCP45HVX1_HAS_ARDUINO_TIME 0
+#endif
+
+#if MCP45HVX1_HAS_ARDUINO_TIME
+#include <Arduino.h>
+#elif defined(ESP_PLATFORM)
+#include <esp_timer.h>
+#define MCP45HVX1_HAS_IDF_TIME 1
+#endif
+
+#ifndef MCP45HVX1_HAS_IDF_TIME
+#define MCP45HVX1_HAS_IDF_TIME 0
+#endif
 
 namespace MCP45HVX1 {
 namespace {
@@ -1036,7 +1058,13 @@ uint32_t MCP45HVX1::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
   }
+#if MCP45HVX1_HAS_ARDUINO_TIME
   return millis();
+#elif MCP45HVX1_HAS_IDF_TIME
+  return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
+#else
+  return 0U;
+#endif
 }
 
 }  // namespace MCP45HVX1

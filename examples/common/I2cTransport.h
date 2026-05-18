@@ -7,8 +7,16 @@
 
 #pragma once
 
+#ifndef MCP45HVX1_EXAMPLE_PLATFORM_IDF
+#define MCP45HVX1_EXAMPLE_PLATFORM_IDF 0
+#endif
+
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+#include "examples/common/IdfArduinoCompat.h"
+#else
 #include <Arduino.h>
 #include <Wire.h>
+#endif
 
 #include "MCP45HVX1/Status.h"
 
@@ -42,12 +50,14 @@ inline MCP45HVX1::Status mapWireResult(uint8_t result, const char* context) {
 
 inline MCP45HVX1::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
                                    uint32_t timeoutMs, void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+  return wire->writeStatus(addr, data, len, timeoutMs);
+#else
+  (void)timeoutMs;
   if (data == nullptr || len == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C write params");
   }
@@ -64,17 +74,20 @@ inline MCP45HVX1::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
   }
 
   return mapWireResult(wire->endTransmission(true), "I2C write failed");
+#endif
 }
 
 inline MCP45HVX1::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
                                        uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
                                        void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+  return wire->writeReadStatus(addr, tx, txLen, rx, rxLen, timeoutMs);
+#else
+  (void)timeoutMs;
   if ((txLen > 0 && tx == nullptr) || rx == nullptr || rxLen == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C read params");
   }
@@ -111,10 +124,11 @@ inline MCP45HVX1::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
   }
 
   return MCP45HVX1::Status::Ok();
+#endif
 }
 
 inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || MCP45HVX1_EXAMPLE_PLATFORM_IDF
   pinMode(scl, OUTPUT);
   pinMode(sda, INPUT_PULLUP);
   for (int i = 0; i < 9; i++) {
@@ -132,14 +146,20 @@ inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutM
   delayMicroseconds(5);
 #endif
 
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+  if (!Wire.begin(sda, scl)) {
+    return false;
+  }
+#else
   Wire.begin(sda, scl);
+#endif
   Wire.setClock(freq);
   Wire.setTimeOut(timeoutMs);
   return true;
 }
 
 inline MCP45HVX1::Status wireBusReset(void* user) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || MCP45HVX1_EXAMPLE_PLATFORM_IDF
   BusResetContext* ctx = static_cast<BusResetContext*>(user);
   if (ctx == nullptr || ctx->sda < 0 || ctx->scl < 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG,
@@ -164,7 +184,14 @@ inline MCP45HVX1::Status wireBusReset(void* user) {
   delayMicroseconds(5);
   pinMode(ctx->sda, INPUT_PULLUP);
 
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+  if (!Wire.begin(ctx->sda, ctx->scl)) {
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_BUS,
+                                    "Wire reinit failed after bus reset");
+  }
+#else
   Wire.begin(ctx->sda, ctx->scl);
+#endif
   Wire.setClock(ctx->frequencyHz);
   Wire.setTimeOut(ctx->timeoutMs);
   return MCP45HVX1::Status::Ok();

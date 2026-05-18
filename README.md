@@ -1,7 +1,7 @@
 # MCP45HVX1 Driver Library
 
 Production-grade MCP45HVX1 high-voltage I2C digital potentiometer driver for
-ESP32 (Arduino/PlatformIO).
+ESP32 (Arduino/PlatformIO and ESP-IDF).
 
 ## Features
 
@@ -32,6 +32,26 @@ lib_deps =
 Copy `include/MCP45HVX1/` and `src/` to your project. The Quick Start also
 uses the optional example Wire adapter from `examples/common/I2cTransport.h`;
 copy that file too, or provide equivalent `Config` transport callbacks.
+
+### ESP-IDF Component
+
+This repository also builds as a pure ESP-IDF component. Add the repo as an
+extra component or dependency, then include `MCP45HVX1/MCP45HVX1.h` and provide
+`Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
+I2C master bus.
+
+The full bring-up CLI is shared between Arduino and ESP-IDF:
+
+```bash
+cd examples/espidf_basic
+idf.py set-target esp32s3
+idf.py build
+```
+
+The ESP-IDF example uses `driver/i2c_master.h` through
+`examples/common/IdfArduinoCompat.h` so it exposes the same commands and serial
+output as `examples/01_basic_bringup_cli`, including last-address reads,
+General Call commands, interface reset, self-test, and stress diagnostics.
 
 ## Quick Start
 
@@ -69,7 +89,9 @@ void loop() {
 ```
 
 The ready-made Arduino transport adapter used by the example CLI is in
-`examples/common/I2cTransport.h`.
+`examples/common/I2cTransport.h`. When `Config::nowMs` is not supplied, the
+driver falls back to `millis()` on Arduino/native-test builds and
+`esp_timer_get_time()` on ESP-IDF builds.
 
 ## API Reference
 
@@ -227,6 +249,15 @@ dump
 drv
 ```
 
+### espidf_basic
+
+Pure ESP-IDF build of the same bring-up CLI. It includes the Arduino example
+source with `MCP45HVX1_EXAMPLE_PLATFORM_IDF=1`, supplies a fixed-capacity
+`String`/serial/GPIO/Wire-compatible shim, and backs I2C transactions with the
+ESP-IDF v6 `i2c_master_*` APIs. The adapter explicitly supports the MCP45HVX1
+last-address read format (`txLen == 0`) and General Call writes to address
+`0x00`.
+
 ## Running Tests
 
 The repository `platformio.ini` pins ESP32 example builds to pioarduino
@@ -242,6 +273,10 @@ pio test -e native
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python scripts/generate_version.py check
+
+# Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
+cd examples/espidf_basic
+idf.py build
 ```
 
 ## Documentation
@@ -251,6 +286,7 @@ python scripts/generate_version.py check
 - <a href="docs/05_register_map.md">Register Map</a>
 - <a href="docs/register_reference.md">Driver Register Reference</a>
 - <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
+- [ESP-IDF Port Notes](docs/IDF_PORT.md)
 - <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
 - <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
 - <a href="docs/releases/v1.0.0.md">Release Notes v1.0.0</a>

@@ -5,7 +5,15 @@
 
 #pragma once
 
+#ifndef MCP45HVX1_EXAMPLE_PLATFORM_IDF
+#define MCP45HVX1_EXAMPLE_PLATFORM_IDF 0
+#endif
+
+#if MCP45HVX1_EXAMPLE_PLATFORM_IDF
+#include "examples/common/IdfArduinoCompat.h"
+#else
 #include <Arduino.h>
+#endif
 
 #include "MCP45HVX1/MCP45HVX1.h"
 
@@ -36,4 +44,3 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
 }
 
 }  // namespace health_view
-
