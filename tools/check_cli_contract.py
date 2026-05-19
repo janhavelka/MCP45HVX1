@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import runpy
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -75,7 +76,6 @@ GENERAL_CALL_IDF_TOKENS = [
     "i2c_master_execute_defined_operations",
 ]
 
-IDF_EXAMPLE_MACRO = "MCP45HVX1_EXAMPLE_PLATFORM_IDF"
 IDF_REQUIRED_COMPONENTS = [
     "MCP45HVX1",
     "esp_driver_i2c",
@@ -153,12 +153,6 @@ def main() -> int:
             fail(f"General Call subcommand '{subcommand}' missing from dispatch")
 
     idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
-    if f"#define {IDF_EXAMPLE_MACRO} 1" not in idf_text:
-        fail(f"{IDF_EXAMPLE_MACRO}=1 missing from ESP-IDF entry point")
-    if '#include "examples/common/IdfArduinoCompat.h"' not in idf_text:
-        fail("ESP-IDF entry point must include IdfArduinoCompat.h")
-    if '#include "examples/01_basic_bringup_cli/main.cpp"' not in idf_text:
-        fail("ESP-IDF entry point must include the Arduino CLI source")
     if 'extern "C" void app_main(void)' not in idf_text:
         fail("ESP-IDF entry point must define app_main()")
 
@@ -167,11 +161,8 @@ def main() -> int:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"ESP-IDF CMake file missing required component '{component}'")
 
-    compat_text = (common_dir / "IdfArduinoCompat.h").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    for token in GENERAL_CALL_IDF_TOKENS:
-        require_token(compat_text, token, "ESP-IDF General Call manual-address path")
+    idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
+    idf_contract["main"]()
 
     print("CLI contract PASSED")
     return 0

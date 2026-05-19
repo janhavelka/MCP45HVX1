@@ -40,7 +40,8 @@ extra component or dependency, then include `MCP45HVX1/MCP45HVX1.h` and provide
 `Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
 I2C master bus.
 
-The full bring-up CLI is shared between Arduino and ESP-IDF:
+The ESP-IDF bring-up CLI is implemented as a native IDF example with the same
+command contract as the Arduino CLI:
 
 ```bash
 cd examples/espidf_basic
@@ -48,15 +49,12 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-The ESP-IDF example uses `driver/i2c_master.h` through
-`examples/common/IdfArduinoCompat.h` so it exposes the same commands and serial
-output as `examples/01_basic_bringup_cli`, including last-address reads,
-General Call commands, interface reset, self-test, and stress diagnostics.
+The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
+`vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
+sources or compatibility facades.
 
-Validation status: command parity is structural through shared source. Native
-tests and Arduino ESP32-S2/S3 example builds passed during this port pass; pure
-ESP-IDF `idf.py` builds and hardware smoke tests are still pending until an IDF
-toolchain and target devices are available.
+Validation status: command parity is checked by repo-local contract scripts.
+Hardware smoke tests are still pending until target devices are available.
 
 ## Quick Start
 
@@ -94,9 +92,8 @@ void loop() {
 ```
 
 The ready-made Arduino transport adapter used by the example CLI is in
-`examples/common/I2cTransport.h`. When `Config::nowMs` is not supplied, the
-driver falls back to `millis()` on Arduino/native-test builds and
-`esp_timer_get_time()` on ESP-IDF builds.
+`examples/common/I2cTransport.h`. Applications that need meaningful health
+timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
 ## API Reference
 
@@ -256,15 +253,12 @@ drv
 
 ### espidf_basic
 
-Pure ESP-IDF build of the same bring-up CLI. It includes the Arduino example
-source with `MCP45HVX1_EXAMPLE_PLATFORM_IDF=1`, supplies a fixed-capacity
-`String`/serial/GPIO/Wire-compatible shim, and backs I2C transactions with the
-ESP-IDF v6 `i2c_master_*` APIs. The adapter explicitly supports the MCP45HVX1
-last-address read format (`txLen == 0`) and General Call writes to address
-`0x00` using ESP-IDF defined I2C operations with manual address bytes.
-`tools/check_cli_contract.py` also checks the IDF entry point, CMake dependency
-surface, General Call CLI subcommands, and manual-address General Call shim
-invariants so future wrapper edits cannot silently drop parity.
+Native ESP-IDF build of the bring-up CLI command contract. It uses
+`app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C
+buffers. The example explicitly supports the MCP45HVX1 last-address read format
+(`txLen == 0`) and General Call writes to address `0x00` using ESP-IDF defined
+I2C operations with manual address bytes. `tools/check_idf_example_contract.py`
+rejects Arduino compatibility facades and checks the native IDF command surface.
 
 ## Running Tests
 
@@ -298,8 +292,8 @@ idf.py build
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
 - <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
 - <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
-- `Doxyfile` indexes public headers, the ESP-IDF port notes, the shared Arduino
-  CLI source, the native IDF entry point, and example-only framework shims.
+- `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
+  and the native IDF entry point.
 
 ## License
 

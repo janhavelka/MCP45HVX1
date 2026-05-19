@@ -2,31 +2,22 @@
 
 ## Unreleased
 
-- ESP-IDF component metadata and a pure ESP-IDF `examples/espidf_basic` build of
-  the full bring-up CLI.
-- `examples/common/IdfArduinoCompat.h` example shim that provides the small
-  Arduino surface used by the CLI while routing I2C through ESP-IDF v6
-  `i2c_master_*` APIs.
+- ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build
+  of the full bring-up CLI command contract.
 - ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
-- Core time fallback is now platform-aware: Arduino/native test builds use
-  `millis()`, while ESP-IDF builds use `esp_timer_get_time()`.
-- Example helpers now gate Arduino headers behind
-  `MCP45HVX1_EXAMPLE_PLATFORM_IDF` so the same CLI source can compile for both
-  frameworks.
+- Core health timestamps now come only from injected `Config::nowMs`; framework
+  time sources live in examples/application glue.
 - `library.json` now declares both `arduino` and `espidf` framework support.
-- Doxygen input now covers the ESP-IDF port notes, implementation notes, shared
-  CLI source, native IDF entry point, and example-only IDF shims.
+- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino
+  CLI source, and native IDF entry point.
 - The ESP-IDF example adapter now sends General Call address `0x00` through
   ESP-IDF defined I2C operations with manual address bytes instead of relying on
   normal device-handle addressing for a reserved address.
-- `tools/check_cli_contract.py` now validates the ESP-IDF wrapper macro,
-  shared-source include, required CMake dependencies, General Call CLI
-  subcommands, and the manual-address General Call shim path.
-- ESP-IDF port docs now spell out the static wrapper contract checks and
-  Doxygen validation coverage.
-- The ESP-IDF CLI parity is structural through shared source; pure IDF
-  `idf.py` builds and hardware validation remain pending until an IDF toolchain
-  and target hardware are available.
+- `tools/check_idf_example_contract.py` validates the native ESP-IDF boundary,
+  required CMake dependencies, General Call CLI subcommands, and manual-address
+  General Call path.
+- The ESP-IDF CLI parity is checked through repo-local command contracts;
+  hardware validation remains pending until target hardware is available.
 - Latched `OFFLINE` behavior for normal public I2C operations. Once the health
   threshold is reached, normal operations return `BUSY` with
   `Driver is offline; call recover()` and do not touch the bus until
