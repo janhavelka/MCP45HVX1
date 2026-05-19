@@ -122,9 +122,16 @@ Completed locally:
 - `python tools/check_cli_contract.py`
 - `python tools/check_core_timing_guard.py`
 - `python scripts/generate_version.py check`
+- `doxygen Doxyfile`
 - `python tools/validate.py` (completed; its internal `pio` shortcut reported
   `SKIP: pio not found`, so PlatformIO builds were run separately via
   `python -m platformio`)
+
+`tools/check_cli_contract.py` verifies both the Arduino CLI command surface and
+the ESP-IDF wrapper contract: platform macro, `IdfArduinoCompat.h`, shared
+source include, `app_main()`, required IDF CMake dependencies, General Call CLI
+subcommands, and the manual-address `0x00` General Call path through
+`i2c_master_execute_defined_operations()`.
 
 Pending in this shell:
 

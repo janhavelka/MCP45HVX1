@@ -66,6 +66,14 @@ MANDATORY_COMMANDS = [
     "stress",
     "stress_mix",
 ]
+GENERAL_CALL_SUBCOMMANDS = ["arm", "disarm", "wiper", "tcon", "inc", "dec"]
+GENERAL_CALL_IDF_TOKENS = [
+    "addr == 0x00U",
+    "transmitWithManualAddress",
+    "I2C_DEVICE_ADDRESS_NOT_USED",
+    "addressByte = static_cast<uint8_t>(addr << 1)",
+    "i2c_master_execute_defined_operations",
+]
 
 IDF_EXAMPLE_MACRO = "MCP45HVX1_EXAMPLE_PLATFORM_IDF"
 IDF_REQUIRED_COMPONENTS = [
@@ -91,6 +99,11 @@ def ensure_exists(path: pathlib.Path, label: str) -> None:
 def ensure_missing(path: pathlib.Path, label: str) -> None:
     if path.exists():
         fail(f"forbidden {label} still present: {path.as_posix()}")
+
+
+def require_token(text: str, token: str, label: str) -> None:
+    if token not in text:
+        fail(f"{label} missing token '{token}'")
 
 
 def main() -> int:
@@ -129,6 +142,16 @@ def main() -> int:
     if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
         fail("either 'cfg' or 'settings' command must be present")
 
+    for subcommand in GENERAL_CALL_SUBCOMMANDS:
+        help_re = re.compile(rf"\bgc\s+{re.escape(subcommand)}\b")
+        dispatch_re = re.compile(
+            rf'strcmp\s*\(\s*sub\s*,\s*"{re.escape(subcommand)}"\s*\)\s*==\s*0'
+        )
+        if help_re.search(text) is None:
+            fail(f"General Call subcommand 'gc {subcommand}' missing from help/usage text")
+        if dispatch_re.search(text) is None:
+            fail(f"General Call subcommand '{subcommand}' missing from dispatch")
+
     idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
     if f"#define {IDF_EXAMPLE_MACRO} 1" not in idf_text:
         fail(f"{IDF_EXAMPLE_MACRO}=1 missing from ESP-IDF entry point")
@@ -143,6 +166,12 @@ def main() -> int:
     for component in IDF_REQUIRED_COMPONENTS:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"ESP-IDF CMake file missing required component '{component}'")
+
+    compat_text = (common_dir / "IdfArduinoCompat.h").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    for token in GENERAL_CALL_IDF_TOKENS:
+        require_token(compat_text, token, "ESP-IDF General Call manual-address path")
 
     print("CLI contract PASSED")
     return 0

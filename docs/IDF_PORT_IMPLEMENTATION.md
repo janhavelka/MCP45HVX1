@@ -47,6 +47,8 @@ Branch: `feature/mcp45hvx1-idf-port`.
   - General Call writes use `i2c_master_execute_defined_operations()` with
     manual address bytes through `I2C_DEVICE_ADDRESS_NOT_USED`, avoiding normal
     device-handle addressing for reserved address `0x00`.
+  - `tools/check_cli_contract.py` statically guards the `gc arm/disarm/wiper/tcon/inc/dec`
+    command surface and the manual-address General Call shim tokens.
 - Arduino-ESP32 pitfall:
   - Do not infer native IDF mode from `ESP_PLATFORM`; Arduino-ESP32 defines it
     too. The shared CLI uses the explicit `MCP45HVX1_EXAMPLE_PLATFORM_IDF` flag.
@@ -69,6 +71,7 @@ Branch: `feature/mcp45hvx1-idf-port`.
 - `python tools/check_cli_contract.py`: passed.
 - `python tools/check_core_timing_guard.py`: passed.
 - `python scripts/generate_version.py check`: passed.
+- `doxygen Doxyfile`: completed.
 - `python tools/validate.py`: completed; its internal `pio` shortcut reported
   `SKIP: pio not found`, so PlatformIO builds were run separately via
   `python -m platformio`.

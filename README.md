@@ -262,8 +262,9 @@ source with `MCP45HVX1_EXAMPLE_PLATFORM_IDF=1`, supplies a fixed-capacity
 ESP-IDF v6 `i2c_master_*` APIs. The adapter explicitly supports the MCP45HVX1
 last-address read format (`txLen == 0`) and General Call writes to address
 `0x00` using ESP-IDF defined I2C operations with manual address bytes.
-`tools/check_cli_contract.py` also checks the IDF entry point and CMake
-dependency surface so future wrapper edits cannot silently drop parity.
+`tools/check_cli_contract.py` also checks the IDF entry point, CMake dependency
+surface, General Call CLI subcommands, and manual-address General Call shim
+invariants so future wrapper edits cannot silently drop parity.
 
 ## Running Tests
 

@@ -20,7 +20,10 @@
   ESP-IDF defined I2C operations with manual address bytes instead of relying on
   normal device-handle addressing for a reserved address.
 - `tools/check_cli_contract.py` now validates the ESP-IDF wrapper macro,
-  shared-source include, and required CMake dependencies.
+  shared-source include, required CMake dependencies, General Call CLI
+  subcommands, and the manual-address General Call shim path.
+- ESP-IDF port docs now spell out the static wrapper contract checks and
+  Doxygen validation coverage.
 - The ESP-IDF CLI parity is structural through shared source; pure IDF
   `idf.py` builds and hardware validation remain pending until an IDF toolchain
   and target hardware are available.
