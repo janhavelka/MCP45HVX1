@@ -298,7 +298,6 @@ idf.py build
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
 - <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
 - <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
-- <a href="docs/releases/v1.0.0.md">Release Notes v1.0.0</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the shared Arduino
   CLI source, the native IDF entry point, and example-only framework shims.
 
