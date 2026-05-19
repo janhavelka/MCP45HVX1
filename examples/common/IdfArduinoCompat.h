@@ -462,6 +462,25 @@ class TwoWire {
       _dev = nullptr;
       _devAddr = 0xFFU;
     }
+    if (_manualAddrDev != nullptr) {
+      (void)i2c_master_bus_rm_device(_manualAddrDev);
+      _manualAddrDev = nullptr;
+    }
+  }
+
+  esp_err_t ensureManualAddressDevice() {
+    if (!_started || _bus == nullptr) {
+      return ESP_ERR_INVALID_STATE;
+    }
+    if (_manualAddrDev != nullptr) {
+      return ESP_OK;
+    }
+
+    i2c_device_config_t devConfig = {};
+    devConfig.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    devConfig.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+    devConfig.scl_speed_hz = _freqHz;
+    return i2c_master_bus_add_device(_bus, &devConfig, &_manualAddrDev);
   }
 
   esp_err_t ensureDevice(uint8_t addr) {
@@ -493,11 +512,40 @@ class TwoWire {
 
   esp_err_t transmit(uint8_t addr, const uint8_t* data, size_t len,
                      uint32_t timeoutMs) {
+    if (addr == 0x00U) {
+      return transmitWithManualAddress(addr, data, len, timeoutMs);
+    }
     esp_err_t err = ensureDevice(addr);
     if (err != ESP_OK) {
       return err;
     }
     return i2c_master_transmit(_dev, data, len, timeoutArg(timeoutMs));
+  }
+
+  esp_err_t transmitWithManualAddress(uint8_t addr, const uint8_t* data,
+                                      size_t len, uint32_t timeoutMs) {
+    if (data == nullptr || len == 0U) {
+      return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = ensureManualAddressDevice();
+    if (err != ESP_OK) {
+      return err;
+    }
+
+    uint8_t addressByte = static_cast<uint8_t>(addr << 1);
+    i2c_operation_job_t ops[4] = {};
+    ops[0].command = I2C_MASTER_CMD_START;
+    ops[1].command = I2C_MASTER_CMD_WRITE;
+    ops[1].write.ack_check = true;
+    ops[1].write.data = &addressByte;
+    ops[1].write.total_bytes = 1U;
+    ops[2].command = I2C_MASTER_CMD_WRITE;
+    ops[2].write.ack_check = true;
+    ops[2].write.data = const_cast<uint8_t*>(data);
+    ops[2].write.total_bytes = len;
+    ops[3].command = I2C_MASTER_CMD_STOP;
+    return i2c_master_execute_defined_operations(_manualAddrDev, ops, 4U,
+                                                 timeoutArg(timeoutMs));
   }
 
   esp_err_t receive(uint8_t addr, uint8_t* data, size_t len,
@@ -521,6 +569,7 @@ class TwoWire {
 
   i2c_master_bus_handle_t _bus = nullptr;
   i2c_master_dev_handle_t _dev = nullptr;
+  i2c_master_dev_handle_t _manualAddrDev = nullptr;
   uint8_t _devAddr = 0xFFU;
   bool _started = false;
   uint32_t _freqHz = 400000U;

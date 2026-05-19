@@ -58,8 +58,9 @@ The adapter preserves MCP45HVX1-specific transport behavior:
   `i2c_master_transmit_receive()`.
 - `i2cWriteRead(..., txLen == 0, ...)` uses `i2c_master_receive()` for the
   documented last-address read format.
-- General Call writes to address `0x00` are sent through the same device-handle
-  cache as normal addresses.
+- General Call writes to address `0x00` are sent through ESP-IDF defined I2C
+  operations with manual address bytes, using a device handle configured with
+  `I2C_DEVICE_ADDRESS_NOT_USED`.
 - The bus reset callback stays in example glue and never moves into the driver.
 
 ESP-IDF errors map to library `Status` values:
