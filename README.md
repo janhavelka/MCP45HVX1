@@ -210,6 +210,55 @@ probe/recover, settings, Wiper/TCON reads and writes, direct register access,
 terminal modes, General Call frames, volatile defaults, I2C interface reset, and
 stress passes.
 
+The CLI follows the same line-oriented output style as the sibling I2C
+bring-up examples. Normal commands print compact sections and two-space
+indented rows:
+
+```text
+=== Register Snapshot ===
+  Wiper: 0x7F (127)
+  Position: 0.4980
+  R_BW: 4980.4 ohm
+  R_AW: 5019.6 ohm
+  TCON: 0xFF
+  Mode: pot
+  Shutdown: no
+  Terminals: A=yes W=yes B=yes
+```
+
+Use `drv` for the one-line health summary and `detail`, `cfg`, or `settings`
+for the detailed health/config/cache view. Raw hardware-oriented output is
+kept behind explicit commands: `raw`/`dump` adds the last-address pointer and
+`rreg`/`last` read direct register/pointer values. `verbose 1` enables
+per-operation details during long-running diagnostics; default output remains
+compact.
+
+Stress commands report progress at fixed intervals and finish with totals,
+timing, health-counter deltas, restore status, first/last failure detail when
+applicable, and a final health line:
+
+```text
+[I] Starting stress test: 8 iterations, 16 operations
+  Progress: 8/16 (50%, ok=8, fail=0)
+=== Stress Summary ===
+  Test: stress
+  Target: 8 iterations
+  Mode: increment/decrement restore
+  Attempts: 16/16
+  Success: 16
+  Errors: 0
+  Success rate: 100.00%
+  Restore: PASS
+  Result: PASS
+```
+
+ANSI color is applied only to status, warning, pass/fail, and counter tokens
+through the shared `Log.h`/`CliStyle.h` helpers. Plain serial logs remain
+readable if escape codes are stripped or the color macros are compiled to empty
+strings. To capture diagnostics for a failure, run `scan`, `probe`, `read`,
+`drv`, `detail`, the failing command, and then `verbose 1` plus `stress [N]`
+or `stress_mix [N]` if the issue is intermittent.
+
 Typical commands:
 
 ```text
