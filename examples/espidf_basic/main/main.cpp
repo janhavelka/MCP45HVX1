@@ -29,6 +29,8 @@ static constexpr size_t LINE_LEN = 160U;
 
 struct NativeBus {
   i2c_master_bus_handle_t bus = nullptr;
+  i2c_master_dev_handle_t device = nullptr;
+  uint8_t deviceAddress = 0;
   i2c_master_dev_handle_t manual = nullptr;
   uint32_t freqHz = I2C_FREQ_HZ;
 };
@@ -69,6 +71,22 @@ esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) 
   dev.device_address = addr;
   dev.scl_speed_hz = bus.freqHz;
   return i2c_master_bus_add_device(bus.bus, &dev, out);
+}
+
+esp_err_t ensureDevice(NativeBus& bus, uint8_t addr) {
+  if (bus.device != nullptr && bus.deviceAddress == addr) {
+    return ESP_OK;
+  }
+  if (bus.device != nullptr) {
+    (void)i2c_master_bus_rm_device(bus.device);
+    bus.device = nullptr;
+    bus.deviceAddress = 0;
+  }
+  esp_err_t err = addDevice(bus, addr, &bus.device);
+  if (err == ESP_OK) {
+    bus.deviceAddress = addr;
+  }
+  return err;
 }
 
 esp_err_t ensureManualDevice(NativeBus& bus) {
@@ -115,13 +133,9 @@ MCP45HVX1::Status i2cWrite(uint8_t addr, const uint8_t* data, size_t len,
   if (addr == 0x00U) {
     return mapI2c(transmitGeneralCall(*bus, data, len, timeoutMs), "I2C general call failed");
   }
-  i2c_master_dev_handle_t dev = nullptr;
-  esp_err_t err = addDevice(*bus, addr, &dev);
+  esp_err_t err = ensureDevice(*bus, addr);
   if (err == ESP_OK) {
-    err = i2c_master_transmit(dev, data, len, timeoutArg(timeoutMs));
-  }
-  if (dev != nullptr) {
-    (void)i2c_master_bus_rm_device(dev);
+    err = i2c_master_transmit(bus->device, data, len, timeoutArg(timeoutMs));
   }
   return mapI2c(err, "I2C write failed");
 }
@@ -133,17 +147,13 @@ MCP45HVX1::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
   if (bus == nullptr || bus->bus == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "I2C bus not initialized");
   }
-  i2c_master_dev_handle_t dev = nullptr;
-  esp_err_t err = addDevice(*bus, addr, &dev);
+  esp_err_t err = ensureDevice(*bus, addr);
   if (err == ESP_OK) {
     if (txLen == 0U) {
-      err = i2c_master_receive(dev, rx, rxLen, timeoutArg(timeoutMs));
+      err = i2c_master_receive(bus->device, rx, rxLen, timeoutArg(timeoutMs));
     } else {
-      err = i2c_master_transmit_receive(dev, tx, txLen, rx, rxLen, timeoutArg(timeoutMs));
+      err = i2c_master_transmit_receive(bus->device, tx, txLen, rx, rxLen, timeoutArg(timeoutMs));
     }
-  }
-  if (dev != nullptr) {
-    (void)i2c_master_bus_rm_device(dev);
   }
   return mapI2c(err, "I2C write-read failed");
 }
@@ -160,6 +170,11 @@ bool initBus() {
 }
 
 MCP45HVX1::Status resetBus(void*) {
+  if (gBus.device != nullptr) {
+    (void)i2c_master_bus_rm_device(gBus.device);
+    gBus.device = nullptr;
+    gBus.deviceAddress = 0;
+  }
   if (gBus.manual != nullptr) {
     (void)i2c_master_bus_rm_device(gBus.manual);
     gBus.manual = nullptr;
@@ -224,6 +239,104 @@ bool parseU32(const char* text, uint32_t* out) {
   return *end == '\0';
 }
 
+bool parseFloatArg(const char* text, float* out) {
+  if (text == nullptr || *text == '\0' || out == nullptr) {
+    return false;
+  }
+  char* end = nullptr;
+  const float v = strtof(text, &end);
+  if (end == text) {
+    return false;
+  }
+  while (*end != '\0' && isspace(static_cast<unsigned char>(*end))) {
+    ++end;
+  }
+  *out = v;
+  return *end == '\0';
+}
+
+const char* resistanceName(MCP45HVX1::ResistanceOption option) {
+  switch (option) {
+    case MCP45HVX1::ResistanceOption::R5K: return "5k";
+    case MCP45HVX1::ResistanceOption::R10K: return "10k";
+    case MCP45HVX1::ResistanceOption::R50K: return "50k";
+    case MCP45HVX1::ResistanceOption::R100K: return "100k";
+    default: return "?";
+  }
+}
+
+bool parseResistance(const char* text, MCP45HVX1::ResistanceOption* out) {
+  if (strcmp(text, "5k") == 0 || strcmp(text, "5000") == 0) {
+    *out = MCP45HVX1::ResistanceOption::R5K;
+    return true;
+  }
+  if (strcmp(text, "10k") == 0 || strcmp(text, "10000") == 0) {
+    *out = MCP45HVX1::ResistanceOption::R10K;
+    return true;
+  }
+  if (strcmp(text, "50k") == 0 || strcmp(text, "50000") == 0) {
+    *out = MCP45HVX1::ResistanceOption::R50K;
+    return true;
+  }
+  if (strcmp(text, "100k") == 0 || strcmp(text, "100000") == 0) {
+    *out = MCP45HVX1::ResistanceOption::R100K;
+    return true;
+  }
+  return false;
+}
+
+const char* terminalModeName(MCP45HVX1::TerminalMode mode) {
+  switch (mode) {
+    case MCP45HVX1::TerminalMode::Potentiometer: return "pot";
+    case MCP45HVX1::TerminalMode::RheostatBToW: return "bw";
+    case MCP45HVX1::TerminalMode::RheostatAToW: return "aw";
+    case MCP45HVX1::TerminalMode::WiperFloating: return "float";
+    case MCP45HVX1::TerminalMode::Shutdown: return "shutdown";
+    case MCP45HVX1::TerminalMode::Custom: return "custom";
+    default: return "?";
+  }
+}
+
+bool parseTerminalMode(const char* text, MCP45HVX1::TerminalMode* out) {
+  if (strcmp(text, "pot") == 0 || strcmp(text, "potentiometer") == 0) {
+    *out = MCP45HVX1::TerminalMode::Potentiometer;
+    return true;
+  }
+  if (strcmp(text, "bw") == 0 || strcmp(text, "rheostat_bw") == 0) {
+    *out = MCP45HVX1::TerminalMode::RheostatBToW;
+    return true;
+  }
+  if (strcmp(text, "aw") == 0 || strcmp(text, "rheostat_aw") == 0) {
+    *out = MCP45HVX1::TerminalMode::RheostatAToW;
+    return true;
+  }
+  if (strcmp(text, "float") == 0 || strcmp(text, "floating") == 0) {
+    *out = MCP45HVX1::TerminalMode::WiperFloating;
+    return true;
+  }
+  if (strcmp(text, "shutdown") == 0) {
+    *out = MCP45HVX1::TerminalMode::Shutdown;
+    return true;
+  }
+  return false;
+}
+
+bool parseTerminal(const char* text, MCP45HVX1::Terminal* out) {
+  if (strcmp(text, "a") == 0 || strcmp(text, "A") == 0) {
+    *out = MCP45HVX1::Terminal::A;
+    return true;
+  }
+  if (strcmp(text, "w") == 0 || strcmp(text, "W") == 0) {
+    *out = MCP45HVX1::Terminal::W;
+    return true;
+  }
+  if (strcmp(text, "b") == 0 || strcmp(text, "B") == 0) {
+    *out = MCP45HVX1::Terminal::B;
+    return true;
+  }
+  return false;
+}
+
 void beginDriver() {
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
@@ -268,6 +381,68 @@ void printDrv() {
          gDev.isOnline() ? 1 : 0, static_cast<unsigned long>(gDev.totalSuccess()),
          static_cast<unsigned long>(gDev.totalFailures()),
          static_cast<unsigned>(gDev.consecutiveFailures()));
+}
+
+void printInfo() {
+  const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
+  printf("addr=0x%02X resolution=%u rab=%s nominal=%lu step=%.3f max_code=0x%02X default=0x%02X alt_range=%d\n",
+         info.i2cAddress, static_cast<unsigned>(info.resolution),
+         resistanceName(info.resistance), static_cast<unsigned long>(info.nominalResistanceOhms),
+         info.nominalStepOhms, info.maxWiperCode, info.defaultWiperCode,
+         info.usingAlternateAddressRange ? 1 : 0);
+}
+
+void printErrata() {
+  const MCP45HVX1::SiliconErrataInfo errata = MCP45HVX1::MCP45HVX1::siliconErrataInfo();
+  printf("%s rev %s: %s\n", errata.documentNumber, errata.documentRevision,
+         errata.documentTitle);
+  printf("shared_bus_hazard=%d general_call_decode_hazard=%d isolated_bus_workaround=%d\n",
+         errata.sharedBusI2cHazard ? 1 : 0,
+         errata.generalCallAddressDecodeHazard ? 1 : 0,
+         errata.uniqueBusWorkaroundForAffectedSilicon ? 1 : 0);
+  puts(errata.markingSummary);
+}
+
+void runStress(uint32_t count) {
+  uint32_t ok = 0;
+  uint32_t fail = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    uint8_t code = 0;
+    MCP45HVX1::Status st = gDev.readWiper(code);
+    if (st.ok()) {
+      ++ok;
+    } else {
+      ++fail;
+      if (gVerbose) {
+        printStatus("stress readWiper", st);
+      }
+    }
+  }
+  printf("stress: ok=%lu fail=%lu\n", static_cast<unsigned long>(ok),
+         static_cast<unsigned long>(fail));
+}
+
+void runSelftest() {
+  uint32_t pass = 0;
+  uint32_t fail = 0;
+  auto check = [&](const char* name, MCP45HVX1::Status st) {
+    printf("[%s] %s\n", st.ok() ? "OK" : "FAIL", name);
+    if (st.ok()) {
+      ++pass;
+    } else {
+      ++fail;
+      if (gVerbose) {
+        printStatus(name, st);
+      }
+    }
+  };
+  check("probe", gDev.probe());
+  MCP45HVX1::RegisterSnapshot snapshot{};
+  check("readSnapshot", gDev.readSnapshot(snapshot));
+  uint8_t last = 0;
+  check("readLastAddress", gDev.readLastAddress(last));
+  printf("selftest: pass=%lu fail=%lu\n", static_cast<unsigned long>(pass),
+         static_cast<unsigned long>(fail));
 }
 
 void handleGc(const char* args) {
@@ -411,19 +586,110 @@ void handleCommand(char* line) {
         printf("tcon=0x%02X\n", tcon);
       }
     }
+  } else if (strcmp(cmd, "wreg") == 0 || strcmp(cmd, "wregs") == 0) {
+    char local[LINE_LEN];
+    snprintf(local, sizeof(local), "%s", args);
+    char* valueText = strchr(local, ' ');
+    uint32_t reg = 0;
+    uint32_t value = 0;
+    if (valueText != nullptr) {
+      *valueText++ = '\0';
+      valueText = trim(valueText);
+    }
+    printStatus(cmd, (valueText != nullptr && parseU32(local, &reg) && parseU32(valueText, &value))
+                         ? gDev.writeRegister(static_cast<uint8_t>(reg),
+                                              static_cast<uint8_t>(value))
+                         : MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM,
+                                                    "usage: wreg <reg> <value>"));
+  } else if (strcmp(cmd, "frac") == 0 || strcmp(cmd, "pos") == 0) {
+    float fraction = 0.0f;
+    if (parseFloatArg(args, &fraction)) {
+      printStatus(cmd, gDev.writeWiperFraction(fraction));
+    } else {
+      MCP45HVX1::Status st = gDev.readWiperFraction(fraction);
+      printStatus(cmd, st);
+      if (st.ok()) {
+        printf("fraction=%.4f\n", fraction);
+      }
+    }
+  } else if (strcmp(cmd, "rab") == 0) {
+    MCP45HVX1::ResistanceOption option{};
+    if (parseResistance(args, &option)) {
+      gCfg.resistance = option;
+      beginDriver();
+    } else {
+      printf("rab=%s nominal=%lu\n", resistanceName(gCfg.resistance),
+             static_cast<unsigned long>(
+                 MCP45HVX1::MCP45HVX1::nominalResistanceOhms(gCfg.resistance)));
+    }
+  } else if (strcmp(cmd, "info") == 0) {
+    printInfo();
+  } else if (strcmp(cmd, "errata") == 0) {
+    printErrata();
+  } else if (strcmp(cmd, "term") == 0) {
+    char local[LINE_LEN];
+    snprintf(local, sizeof(local), "%s", args);
+    char* valueText = strchr(local, ' ');
+    if (valueText != nullptr) {
+      *valueText++ = '\0';
+      valueText = trim(valueText);
+    }
+    MCP45HVX1::Terminal terminal{};
+    uint32_t enabled = 0;
+    if (valueText != nullptr && parseTerminal(local, &terminal) && parseU32(valueText, &enabled)) {
+      printStatus("term", gDev.setTerminalEnabled(terminal, enabled != 0U));
+    } else if (parseTerminal(local, &terminal)) {
+      bool enabledFlag = false;
+      MCP45HVX1::Status st = gDev.getTerminalEnabled(terminal, enabledFlag);
+      printStatus("term", st);
+      if (st.ok()) {
+        printf("enabled=%d\n", enabledFlag ? 1 : 0);
+      }
+    } else {
+      MCP45HVX1::TerminalStatus status{};
+      MCP45HVX1::Status st = gDev.readTerminalStatus(status);
+      printStatus("term", st);
+      if (st.ok()) {
+        printf("mode=%s shutdown=%d A=%d W=%d B=%d\n",
+               terminalModeName(status.mode), status.softwareShutdown ? 1 : 0,
+               status.terminalA ? 1 : 0, status.terminalW ? 1 : 0,
+               status.terminalB ? 1 : 0);
+      }
+    }
+  } else if (strcmp(cmd, "shutdown") == 0) {
+    uint32_t enabled = 0;
+    if (parseU32(args, &enabled)) {
+      printStatus("shutdown", gDev.setSoftwareShutdown(enabled != 0U));
+    } else {
+      bool isShutdown = false;
+      MCP45HVX1::Status st = gDev.getSoftwareShutdown(isShutdown);
+      printStatus("shutdown", st);
+      if (st.ok()) {
+        printf("shutdown=%d\n", isShutdown ? 1 : 0);
+      }
+    }
+  } else if (strcmp(cmd, "mode") == 0) {
+    MCP45HVX1::TerminalMode mode{};
+    if (parseTerminalMode(args, &mode)) {
+      printStatus("mode", gDev.setTerminalMode(mode));
+    } else {
+      MCP45HVX1::Status st = gDev.getTerminalMode(mode);
+      printStatus("mode", st);
+      if (st.ok()) {
+        printf("mode=%s\n", terminalModeName(mode));
+      }
+    }
   } else if (strcmp(cmd, "gc") == 0) {
     handleGc(args);
+  } else if (strcmp(cmd, "selftest") == 0) {
+    runSelftest();
+  } else if (strcmp(cmd, "stress") == 0 || strcmp(cmd, "stress_mix") == 0) {
+    uint32_t count = 10;
+    (void)parseU32(args, &count);
+    runStress(count);
   } else if (strcmp(cmd, "verbose") == 0) {
     gVerbose = (strcmp(args, "1") == 0) || (!gVerbose && *args == '\0');
     printf("verbose=%d\n", gVerbose ? 1 : 0);
-  } else if (strcmp(cmd, "selftest") == 0 || strcmp(cmd, "stress") == 0 ||
-             strcmp(cmd, "stress_mix") == 0 || strcmp(cmd, "info") == 0 ||
-             strcmp(cmd, "errata") == 0 || strcmp(cmd, "rab") == 0 ||
-             strcmp(cmd, "frac") == 0 || strcmp(cmd, "pos") == 0 ||
-             strcmp(cmd, "wreg") == 0 || strcmp(cmd, "wregs") == 0 ||
-             strcmp(cmd, "term") == 0 || strcmp(cmd, "shutdown") == 0 ||
-             strcmp(cmd, "mode") == 0) {
-    puts("Command is present in the native IDF contract; use help for arguments.");
   } else {
     puts("Unknown command. Try 'help'.");
   }

@@ -424,6 +424,7 @@ private:
   Status _i2cWriteReadTracked(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                               uint8_t* rxBuf, size_t rxLen);
   Status _i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len);
+  Status _busResetTracked(bool trackSuccess);
 
   // Register helpers
   Status _readRegisterRaw(uint8_t reg, uint8_t& value);
