@@ -78,12 +78,12 @@ inline void scan(TwoWire& wire, uint16_t timeoutMs = 50) {
       uint8_t error = wire.endTransmission(true);
 
       if (error == 0) {
-        LOG_SERIAL.printf("%02X ", addr);
+        LOG_SERIAL.printf("%s%02X%s ", LOG_COLOR_GREEN, addr, LOG_COLOR_RESET);
         count++;
       } else if (error == 5) {
-        LOG_SERIAL.print("TO ");
+        LOG_SERIAL.printf("%sTO%s ", LOG_COLOR_YELLOW, LOG_COLOR_RESET);
       } else {
-        LOG_SERIAL.print("-- ");
+        LOG_SERIAL.printf("%s--%s ", LOG_COLOR_GRAY, LOG_COLOR_RESET);
       }
 
       yield();

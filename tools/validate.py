@@ -21,17 +21,25 @@ def run(cmd: list[str], required: bool = True) -> bool:
 def main() -> int:
     python = sys.executable
     run([python, "tools/check_cli_contract.py"])
+    run([python, "tools/check_idf_example_contract.py"])
     run([python, "tools/check_core_timing_guard.py"])
+    run([python, "tools/check_generated_artifacts.py"])
     run([python, "scripts/generate_version.py", "check"])
     obj = os.devnull
 
     if shutil.which("g++"):
         run([
             "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror=return-type",
-            "-Iinclude", "-Itest/stubs", "-c", "src/MCP45HVX1.cpp", "-o", obj
+            "-Iinclude", "-c", "src/MCP45HVX1.cpp", "-o", obj
         ])
         run([
             "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror=return-type",
+            "-I.", "-Iinclude", "-Iexamples", "-Itest/stubs", "-c",
+            "examples/01_basic_bringup_cli/main.cpp", "-o", obj
+        ])
+        run([
+            "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror=return-type",
+            "-DMCP45HVX1_CLI_ENABLE_COLOR=0", "-DMCP45HVX1_CLI_COLOR_DEFAULT=0",
             "-I.", "-Iinclude", "-Iexamples", "-Itest/stubs", "-c",
             "examples/01_basic_bringup_cli/main.cpp", "-o", obj
         ])

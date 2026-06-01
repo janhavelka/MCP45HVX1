@@ -21,13 +21,52 @@
 #define LOG_SERIAL Serial
 #endif
 
-#define LOG_COLOR_RESET  "\033[0m"
-#define LOG_COLOR_RED    "\033[31m"
-#define LOG_COLOR_GREEN  "\033[32m"
-#define LOG_COLOR_YELLOW "\033[33m"
-#define LOG_COLOR_BLUE   "\033[34m"
-#define LOG_COLOR_CYAN   "\033[36m"
-#define LOG_COLOR_GRAY   "\033[90m"
+namespace log_color {
+
+inline bool& enabledFlag() {
+#if MCP45HVX1_CLI_ENABLE_COLOR
+  static bool enabled = (MCP45HVX1_CLI_COLOR_DEFAULT != 0);
+#else
+  static bool enabled = false;
+#endif
+  return enabled;
+}
+
+inline bool isEnabled() {
+#if MCP45HVX1_CLI_ENABLE_COLOR
+  return enabledFlag();
+#else
+  return false;
+#endif
+}
+
+inline void setEnabled(bool enabled) {
+#if MCP45HVX1_CLI_ENABLE_COLOR
+  enabledFlag() = enabled;
+#else
+  (void)enabled;
+#endif
+}
+
+inline const char* code(const char* sequence) {
+#if MCP45HVX1_CLI_ENABLE_COLOR
+  return enabledFlag() ? sequence : "";
+#else
+  (void)sequence;
+  return "";
+#endif
+}
+
+}  // namespace log_color
+
+#define LOG_COLOR_RESET  log_color::code("\033[0m")
+#define LOG_COLOR_RED    log_color::code("\033[31m")
+#define LOG_COLOR_GREEN  log_color::code("\033[32m")
+#define LOG_COLOR_YELLOW log_color::code("\033[33m")
+#define LOG_COLOR_BLUE   log_color::code("\033[34m")
+#define LOG_COLOR_MAGENTA log_color::code("\033[35m")
+#define LOG_COLOR_CYAN   log_color::code("\033[36m")
+#define LOG_COLOR_GRAY   log_color::code("\033[90m")
 #define LOG_COLOR_RESULT(ok) ((ok) ? LOG_COLOR_GREEN : LOG_COLOR_RED)
 #define LOG_COLOR_STATE(online, failures) \
   ((online) ? (((failures) > 0U) ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN) : LOG_COLOR_RED)
@@ -48,7 +87,7 @@ inline void log_begin(unsigned long baud = 115200) {
 
 // Colorize only the severity tag; keep message text in terminal default color.
 #define LOG_PRINT_WITH_TAG(tagColor, tag, fmt, ...) \
-  LOG_SERIAL.printf(tagColor "[" tag "]" LOG_COLOR_RESET " " fmt "\n", ##__VA_ARGS__)
+  LOG_SERIAL.printf("%s[" tag "]%s " fmt "\n", tagColor, LOG_COLOR_RESET, ##__VA_ARGS__)
 
 /// @brief Log error message (level >= 1)
 #define LOGE(fmt, ...) \

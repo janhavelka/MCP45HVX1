@@ -29,9 +29,12 @@ MANDATORY_COMMANDS = [
     "version",
     "ver",
     "scan",
+    "color",
     "begin",
     "addr",
+    "addr_alt",
     "res",
+    "variant",
     "rab",
     "probe",
     "recover",
@@ -40,12 +43,19 @@ MANDATORY_COMMANDS = [
     "drv",
     "cfg",
     "settings",
+    "detail",
+    "health",
+    "state",
     "info",
     "errata",
     "read",
     "rregs",
+    "readwiper",
+    "readtcon",
     "dump",
+    "raw",
     "last",
+    "reg",
     "rreg",
     "wreg",
     "wregs",
@@ -59,7 +69,9 @@ MANDATORY_COMMANDS = [
     "dec",
     "tcon",
     "term",
+    "terminal",
     "shutdown",
+    "software-shutdown",
     "mode",
     "gc",
     "selftest",
@@ -84,6 +96,41 @@ IDF_REQUIRED_COMPONENTS = [
     "freertos",
     "vfs",
 ]
+
+COMMAND_ACTIONS = {
+    "scan": "bus_diag::scan",
+    "color": "handleColor",
+    "begin": "handleBegin",
+    "addr": "handleAddress",
+    "addr_alt": "handleAlternateAddress",
+    "variant": "handleResolution",
+    "rab": "handleResistance",
+    "probe": "gDev.probe",
+    "recover": "gDev.recover",
+    "defaults": "gDev.restorePowerOnDefaults",
+    "read": "readRegisters",
+    "readwiper": "handleWiper",
+    "readtcon": "handleTcon",
+    "raw": "handleRaw",
+    "reg": "handleReadRegister",
+    "wreg": "handleWriteRegister",
+    "wiper": "handleWiper",
+    "tcon": "handleTcon",
+    "terminal": "handleTerm",
+    "software-shutdown": "handleShutdown",
+    "cfg": "printConfigSnapshot",
+    "health": "printDriverHealth",
+    "state": "printStateLine",
+    "selftest": "handleSelfTest",
+    "stress": "runStress",
+    "stress_mix": "runStress",
+    "verbose": "handleVerbose",
+    "gc": "handleGeneralCall",
+}
+
+FORBIDDEN_PLACEHOLDER_RE = re.compile(
+    r"\b(TODO|FIXME|placeholder|stub|not implemented)\b", re.IGNORECASE
+)
 
 
 def fail(msg: str) -> None:
@@ -139,6 +186,15 @@ def main() -> int:
             if help_re.search(text) is None:
                 fail(f"mandatory command '{cmd}' missing from help text")
 
+    for cmd, token in COMMAND_ACTIONS.items():
+        if token not in text:
+            fail(f"command '{cmd}' missing expected action token '{token}'")
+
+    general_call_body = text[text.find("void handleGeneralCall") :]
+    for sub in ("arm", "disarm", "wiper", "tcon", "inc", "dec"):
+        if f'"{sub}"' not in general_call_body:
+            fail(f"General Call subcommand '{sub}' missing handler branch")
+
     if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
         fail("either 'cfg' or 'settings' command must be present")
 
@@ -163,6 +219,32 @@ def main() -> int:
 
     idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
     idf_contract["main"]()
+
+    for rel in (
+        "examples/01_basic_bringup_cli/main.cpp",
+        "examples/common/Log.h",
+        "examples/common/CliStyle.h",
+        "examples/common/CliShell.h",
+    ):
+        path = ROOT / rel
+        content = path.read_text(encoding="utf-8", errors="replace")
+        if FORBIDDEN_PLACEHOLDER_RE.search(content):
+            fail(f"placeholder/stub marker found in {rel}")
+
+    log_text = (common_dir / "Log.h").read_text(encoding="utf-8", errors="replace")
+    build_text = (common_dir / "BuildConfig.h").read_text(encoding="utf-8", errors="replace")
+    for token in (
+        "MCP45HVX1_CLI_ENABLE_COLOR",
+        "MCP45HVX1_CLI_COLOR_DEFAULT",
+        "log_color::setEnabled",
+    ):
+        if token not in log_text and token not in build_text and token not in text:
+            fail(f"color disable support missing token '{token}'")
+
+    for path in (ROOT / "examples").rglob("*"):
+        if path.is_file() and path.suffix in {".h", ".cpp"} and path.name != "Log.h":
+            if "\\033" in path.read_text(encoding="utf-8", errors="replace"):
+                fail(f"raw ANSI escape must live only in Log.h: {path.relative_to(ROOT)}")
 
     print("CLI contract PASSED")
     return 0

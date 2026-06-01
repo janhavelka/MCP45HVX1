@@ -40,6 +40,7 @@ MCP45HVX1::MCP45HVX1 gDev;
 MCP45HVX1::Config gCfg;
 bool gVerbose = false;
 bool gGcArmed = false;
+bool gColor = true;
 
 uint32_t nowMs(void*) {
   return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
@@ -255,6 +256,63 @@ bool parseFloatArg(const char* text, float* out) {
   return *end == '\0';
 }
 
+bool parseBoolArg(const char* text, bool* out) {
+  if (text == nullptr || out == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "1") == 0 || strcmp(text, "on") == 0 ||
+      strcmp(text, "true") == 0 || strcmp(text, "yes") == 0) {
+    *out = true;
+    return true;
+  }
+  if (strcmp(text, "0") == 0 || strcmp(text, "off") == 0 ||
+      strcmp(text, "false") == 0 || strcmp(text, "no") == 0) {
+    *out = false;
+    return true;
+  }
+  return false;
+}
+
+bool isPrimaryAddress(uint8_t address) {
+  return address >= MCP45HVX1::cmd::MIN_ADDRESS && address <= MCP45HVX1::cmd::MAX_ADDRESS;
+}
+
+bool isAlternateAddress(uint8_t address) {
+  return address >= MCP45HVX1::cmd::ALT_MIN_ADDRESS &&
+         address <= MCP45HVX1::cmd::ALT_MAX_ADDRESS;
+}
+
+const char* stateName(MCP45HVX1::DriverState state) {
+  switch (state) {
+    case MCP45HVX1::DriverState::UNINIT: return "UNINIT";
+    case MCP45HVX1::DriverState::READY: return "READY";
+    case MCP45HVX1::DriverState::DEGRADED: return "DEGRADED";
+    case MCP45HVX1::DriverState::OFFLINE: return "OFFLINE";
+    default: return "?";
+  }
+}
+
+const char* variantName(MCP45HVX1::Resolution resolution) {
+  return resolution == MCP45HVX1::Resolution::Bits7 ? "MCP45HV31" : "MCP45HV51";
+}
+
+bool parseResolutionText(const char* text, MCP45HVX1::Resolution* out) {
+  if (text == nullptr || out == nullptr) {
+    return false;
+  }
+  if (strcmp(text, "7") == 0 || strcmp(text, "hv31") == 0 ||
+      strcmp(text, "mcp45hv31") == 0) {
+    *out = MCP45HVX1::Resolution::Bits7;
+    return true;
+  }
+  if (strcmp(text, "8") == 0 || strcmp(text, "hv51") == 0 ||
+      strcmp(text, "mcp45hv51") == 0) {
+    *out = MCP45HVX1::Resolution::Bits8;
+    return true;
+  }
+  return false;
+}
+
 const char* resistanceName(MCP45HVX1::ResistanceOption option) {
   switch (option) {
     case MCP45HVX1::ResistanceOption::R5K: return "5k";
@@ -349,21 +407,24 @@ void beginDriver() {
 
 void printHelp() {
   puts("Native ESP-IDF MCP45HVX1 CLI");
-  puts("  help | ?");
-  puts("  version | ver");
-  puts("  scan");
-  puts("  begin [addr] [7|8]");
-  puts("  addr <0x3c..0x3f|0x5c..0x5f>");
-  puts("  res <7|8>");
-  puts("  rab <5k|10k|50k|100k>");
-  puts("  probe | recover | iface_reset | defaults");
-  puts("  read | rregs | dump | last | rreg <reg> | wreg <reg> <value> | wregs <reg> <value>");
-  puts("  wiper [0..max] | frac [0.0..1.0] | pos [0.0..1.0]");
-  puts("  zero | mid | max | inc [n] | dec [n]");
-  puts("  tcon [value] | term a|w|b [0|1] | shutdown [0|1] | mode [pot|bw|aw|float|shutdown]");
-  puts("  cfg | settings | drv | info | errata");
+  puts("Common:");
+  puts("  help | ? | version | ver | color [on|off] | verbose [0|1]");
+  puts("Device selection:");
+  puts("  scan | begin [addr] [7|8] | addr <0x3c..0x3f> | addr_alt <0x5c..0x5f>");
+  puts("  variant [hv31|hv51] | res <7|8> | rab <5k|10k|50k|100k>");
+  puts("Read-only diagnostics:");
+  puts("  probe | recover | iface_reset | read | rregs | readwiper | readtcon");
+  puts("  dump | raw | last | reg <reg> | rreg <reg>");
+  puts("  cfg | settings | detail | drv | health | state | info | errata");
+  puts("Output-changing commands:");
+  puts("  defaults | wiper [0..max] | wiper percent <0..100> | wiper fraction <0.0..1.0>");
+  puts("  frac [0.0..1.0] | pos [0.0..1.0] | zero | mid | max | inc [n] | dec [n]");
+  puts("  tcon [value|default] | term a|w|b [on|off] | terminal a|w|b [on|off]");
+  puts("  shutdown [on|off] | software-shutdown [on|off] | mode [pot|bw|aw|float|shutdown]");
+  puts("Dangerous / operator-gated:");
+  puts("  raw write <reg> <value> | wreg <reg> <value> | wregs <reg> <value>");
   puts("  gc arm | gc disarm | gc wiper <code> | gc tcon <value> | gc inc | gc dec");
-  puts("  selftest | stress [n] | stress_mix [n] | verbose [0|1]");
+  puts("  selftest | selftest safe | selftest output | stress [n] | stress_mix [n]");
 }
 
 void scanBus() {
@@ -376,20 +437,71 @@ void scanBus() {
 }
 
 void printDrv() {
-  printf("state=%u initialized=%d online=%d ok=%lu fail=%lu consecutive=%u\n",
-         static_cast<unsigned>(gDev.state()), gDev.isInitialized() ? 1 : 0,
+  printf("state=%s initialized=%d online=%d ok=%lu fail=%lu consecutive=%u\n",
+         stateName(gDev.state()), gDev.isInitialized() ? 1 : 0,
          gDev.isOnline() ? 1 : 0, static_cast<unsigned long>(gDev.totalSuccess()),
          static_cast<unsigned long>(gDev.totalFailures()),
          static_cast<unsigned>(gDev.consecutiveFailures()));
 }
 
+void printStateLine() {
+  const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
+  const MCP45HVX1::Status last = gDev.lastError();
+  printf("state=%s initialized=%d online=%d addr=0x%02X variant=%s ok=%lu fail=%lu consecutive=%u last_code=%u\n",
+         stateName(gDev.state()), gDev.isInitialized() ? 1 : 0, gDev.isOnline() ? 1 : 0,
+         info.i2cAddress, variantName(info.resolution),
+         static_cast<unsigned long>(gDev.totalSuccess()),
+         static_cast<unsigned long>(gDev.totalFailures()),
+         static_cast<unsigned>(gDev.consecutiveFailures()),
+         static_cast<unsigned>(last.code));
+}
+
+void printDriverHealth() {
+  MCP45HVX1::SettingsSnapshot s{};
+  (void)gDev.getSettings(s);
+  printf("health state=%s initialized=%d online=%d\n",
+         stateName(s.state), s.initialized ? 1 : 0, gDev.isOnline() ? 1 : 0);
+  printf("  ok=%lu fail=%lu consecutive=%u threshold=%u\n",
+         static_cast<unsigned long>(s.totalSuccess),
+         static_cast<unsigned long>(s.totalFailures),
+         static_cast<unsigned>(s.consecutiveFailures),
+         static_cast<unsigned>(s.config.offlineThreshold));
+  printf("  last_ok_ms=%lu last_error_ms=%lu last_code=%u last_detail=%ld\n",
+         static_cast<unsigned long>(s.lastOkMs),
+         static_cast<unsigned long>(s.lastErrorMs),
+         static_cast<unsigned>(s.lastError.code),
+         static_cast<long>(s.lastError.detail));
+  printf("  cache wiper=%s 0x%02X tcon=%s 0x%02X pointer=%s 0x%02X\n",
+         s.cachedWiperKnown ? "known" : "unknown", s.cachedWiper,
+         s.cachedTconKnown ? "known" : "unknown", s.cachedTcon,
+         s.addressPointerKnown ? "known" : "unknown", s.addressPointer);
+}
+
 void printInfo() {
   const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
-  printf("addr=0x%02X resolution=%u rab=%s nominal=%lu step=%.3f max_code=0x%02X default=0x%02X alt_range=%d\n",
-         info.i2cAddress, static_cast<unsigned>(info.resolution),
+  printf("addr=0x%02X variant=%s resolution=%u rab=%s nominal=%lu step=%.3f max_code=0x%02X default=0x%02X alt_range=%d\n",
+         info.i2cAddress, variantName(info.resolution), static_cast<unsigned>(info.resolution),
          resistanceName(info.resistance), static_cast<unsigned long>(info.nominalResistanceOhms),
          info.nominalStepOhms, info.maxWiperCode, info.defaultWiperCode,
          info.usingAlternateAddressRange ? 1 : 0);
+}
+
+void printConfigSnapshot() {
+  MCP45HVX1::SettingsSnapshot s{};
+  (void)gDev.getSettings(s);
+  printInfo();
+  printf("timeout_ms=%lu alternate_allowed=%d require_por=%d require_msb_zero=%d color=%d verbose=%d\n",
+         static_cast<unsigned long>(s.config.i2cTimeoutMs),
+         s.config.allowAlternateAddressRange ? 1 : 0,
+         s.config.requirePowerOnDefaults ? 1 : 0,
+         s.config.requireReadMsbZero ? 1 : 0,
+         gColor ? 1 : 0,
+         gVerbose ? 1 : 0);
+  printf("initial_wiper_write=%d initial_wiper=0x%02X initial_tcon_write=%d initial_tcon=0x%02X\n",
+         s.config.writeInitialWiper ? 1 : 0,
+         s.config.initialWiperCode,
+         s.config.writeInitialTcon ? 1 : 0,
+         s.config.initialTcon);
 }
 
 void printErrata() {
@@ -403,12 +515,111 @@ void printErrata() {
   puts(errata.markingSummary);
 }
 
-void runStress(uint32_t count) {
+void readRegisters(bool includeLastAddress) {
+  MCP45HVX1::RegisterSnapshot s;
+  MCP45HVX1::Status st = gDev.readSnapshot(s);
+  printStatus("read", st);
+  if (st.ok()) {
+    const MCP45HVX1::TerminalStatus terminal = MCP45HVX1::MCP45HVX1::decodeTcon(s.tcon);
+    printf("wiper=0x%02X tcon=0x%02X mode=%s shutdown=%d A=%d W=%d B=%d\n",
+           s.wiper, s.tcon, terminalModeName(terminal.mode),
+           terminal.softwareShutdown ? 1 : 0, terminal.terminalA ? 1 : 0,
+           terminal.terminalW ? 1 : 0, terminal.terminalB ? 1 : 0);
+  }
+  if (includeLastAddress) {
+    uint8_t last = 0;
+    st = gDev.readLastAddress(last);
+    printStatus("last", st);
+    if (st.ok()) {
+      printf("last=0x%02X\n", last);
+    }
+  }
+}
+
+void readWiperCommand(const char* label) {
+  uint8_t code = 0;
+  MCP45HVX1::Status st = gDev.readWiper(code);
+  printStatus(label, st);
+  if (st.ok()) {
+    printf("wiper=0x%02X\n", code);
+  }
+}
+
+void readTconCommand(const char* label) {
+  uint8_t tcon = 0;
+  MCP45HVX1::Status st = gDev.readTcon(tcon);
+  printStatus(label, st);
+  if (st.ok()) {
+    const MCP45HVX1::TerminalStatus terminal = MCP45HVX1::MCP45HVX1::decodeTcon(tcon);
+    printf("tcon=0x%02X mode=%s shutdown=%d A=%d W=%d B=%d\n",
+           tcon, terminalModeName(terminal.mode), terminal.softwareShutdown ? 1 : 0,
+           terminal.terminalA ? 1 : 0, terminal.terminalW ? 1 : 0,
+           terminal.terminalB ? 1 : 0);
+  }
+}
+
+void runStress(uint32_t count, bool mixed) {
+  if (count == 0U) {
+    puts("stress count must be > 0");
+    return;
+  }
   uint32_t ok = 0;
   uint32_t fail = 0;
+  if (mixed) {
+    puts("WARNING: stress_mix changes Wiper/TCON repeatedly, then restores the starting snapshot.");
+    MCP45HVX1::RegisterSnapshot original;
+    MCP45HVX1::Status st = gDev.readSnapshot(original);
+    if (!st.ok()) {
+      printStatus("stress_mix baseline", st);
+      return;
+    }
+    const uint8_t maxCode = MCP45HVX1::MCP45HVX1::maxWiperCode(gCfg.resolution);
+    for (uint32_t i = 0; i < count; ++i) {
+      st = gDev.writeWiper((i % 2U) == 0U ? 0U : maxCode);
+      if (st.ok()) {
+        ++ok;
+      } else {
+        ++fail;
+        if (gVerbose) {
+          printStatus("stress_mix writeWiper", st);
+        }
+        break;
+      }
+      const MCP45HVX1::TerminalMode mode =
+          (i % 3U) == 0U ? MCP45HVX1::TerminalMode::Potentiometer
+                         : ((i % 3U) == 1U ? MCP45HVX1::TerminalMode::RheostatBToW
+                                           : MCP45HVX1::TerminalMode::RheostatAToW);
+      st = gDev.setTerminalMode(mode);
+      if (st.ok()) {
+        ++ok;
+      } else {
+        ++fail;
+        if (gVerbose) {
+          printStatus("stress_mix setTerminalMode", st);
+        }
+        break;
+      }
+    }
+    const MCP45HVX1::Status restoreTcon = gDev.writeTcon(original.tcon);
+    const MCP45HVX1::Status restoreWiper = gDev.writeWiper(original.wiper);
+    printf("stress_mix: ok=%lu fail=%lu restore_tcon=%s restore_wiper=%s\n",
+           static_cast<unsigned long>(ok), static_cast<unsigned long>(fail),
+           restoreTcon.ok() ? "OK" : "FAIL", restoreWiper.ok() ? "OK" : "FAIL");
+    return;
+  }
   for (uint32_t i = 0; i < count; ++i) {
-    uint8_t code = 0;
-    MCP45HVX1::Status st = gDev.readWiper(code);
+    MCP45HVX1::Status st = gDev.probe();
+    if (st.ok()) {
+      ++ok;
+    } else {
+      ++fail;
+      if (gVerbose) {
+        printStatus("stress probe", st);
+      }
+      break;
+    }
+    uint8_t value = 0;
+    st = gDev.readWiper(value);
     if (st.ok()) {
       ++ok;
     } else {
@@ -416,6 +627,17 @@ void runStress(uint32_t count) {
       if (gVerbose) {
         printStatus("stress readWiper", st);
       }
+      break;
+    }
+    st = gDev.readTcon(value);
+    if (st.ok()) {
+      ++ok;
+    } else {
+      ++fail;
+      if (gVerbose) {
+        printStatus("stress readTcon", st);
+      }
+      break;
     }
   }
   printf("stress: ok=%lu fail=%lu\n", static_cast<unsigned long>(ok),
@@ -499,24 +721,76 @@ void handleCommand(char* line) {
     printf("MCP45HVX1 %s %s\n", MCP45HVX1::VERSION, MCP45HVX1::VERSION_FULL);
   } else if (strcmp(cmd, "scan") == 0) {
     scanBus();
+  } else if (strcmp(cmd, "color") == 0) {
+    if (*args == '\0') {
+      printf("color=%d\n", gColor ? 1 : 0);
+    } else if (parseBoolArg(args, &gColor)) {
+      printf("color=%d\n", gColor ? 1 : 0);
+    } else {
+      puts("Usage: color [on|off]");
+    }
   } else if (strcmp(cmd, "begin") == 0) {
+    char local[LINE_LEN];
+    snprintf(local, sizeof(local), "%s", args);
+    char* first = trim(local);
+    char* second = strchr(first, ' ');
+    if (second != nullptr) {
+      *second++ = '\0';
+      second = trim(second);
+    }
     uint32_t v = 0;
-    if (parseU32(args, &v)) {
-      gCfg.i2cAddress = static_cast<uint8_t>(v);
+    MCP45HVX1::Resolution resolution = gCfg.resolution;
+    if (*first != '\0') {
+      if (parseResolutionText(first, &resolution)) {
+        gCfg.resolution = resolution;
+      } else if (parseU32(first, &v)) {
+        const uint8_t address = static_cast<uint8_t>(v);
+        gCfg.i2cAddress = address;
+        gCfg.allowAlternateAddressRange = isAlternateAddress(address);
+      } else {
+        puts("Usage: begin [addr] [7|8]");
+        return;
+      }
+    }
+    if (second != nullptr && *second != '\0') {
+      if (!parseResolutionText(second, &resolution)) {
+        puts("Usage: begin [addr] [7|8]");
+        return;
+      }
+      gCfg.resolution = resolution;
     }
     beginDriver();
   } else if (strcmp(cmd, "addr") == 0) {
     uint32_t v = 0;
-    if (parseU32(args, &v)) {
+    if (*args == '\0') {
+      printInfo();
+    } else if (parseU32(args, &v) && isPrimaryAddress(static_cast<uint8_t>(v))) {
       gCfg.i2cAddress = static_cast<uint8_t>(v);
+      gCfg.allowAlternateAddressRange = false;
       beginDriver();
     } else {
-      puts("Usage: addr <address>");
+      puts("Usage: addr <0x3c..0x3f>; use addr_alt for 0x5c..0x5f");
     }
-  } else if (strcmp(cmd, "res") == 0) {
-    gCfg.resolution = (strcmp(args, "7") == 0) ? MCP45HVX1::Resolution::Bits7
-                                                : MCP45HVX1::Resolution::Bits8;
-    beginDriver();
+  } else if (strcmp(cmd, "addr_alt") == 0) {
+    uint32_t v = 0;
+    if (parseU32(args, &v) && isAlternateAddress(static_cast<uint8_t>(v))) {
+      puts("WARNING: using disputed alternate address range 0x5c..0x5f.");
+      gCfg.i2cAddress = static_cast<uint8_t>(v);
+      gCfg.allowAlternateAddressRange = true;
+      beginDriver();
+    } else {
+      puts("Usage: addr_alt <0x5c..0x5f>");
+    }
+  } else if (strcmp(cmd, "res") == 0 || strcmp(cmd, "variant") == 0) {
+    MCP45HVX1::Resolution resolution = gCfg.resolution;
+    if (*args == '\0') {
+      printInfo();
+    } else if (parseResolutionText(args, &resolution)) {
+      gCfg.resolution = resolution;
+      beginDriver();
+    } else {
+      puts("Usage: variant [hv31|hv51] or res <7|8>");
+    }
   } else if (strcmp(cmd, "probe") == 0) {
     printStatus("probe", gDev.probe());
   } else if (strcmp(cmd, "recover") == 0) {
@@ -524,18 +798,25 @@ void handleCommand(char* line) {
   } else if (strcmp(cmd, "iface_reset") == 0) {
     printStatus("iface_reset", gDev.resetI2cState());
   } else if (strcmp(cmd, "defaults") == 0) {
+    puts("WARNING: defaults writes Wiper and TCON volatile registers.");
     printStatus("defaults", gDev.restorePowerOnDefaults());
-  } else if (strcmp(cmd, "drv") == 0 || strcmp(cmd, "cfg") == 0 ||
-             strcmp(cmd, "settings") == 0) {
-    printDrv();
-  } else if (strcmp(cmd, "read") == 0 || strcmp(cmd, "rregs") == 0 ||
-             strcmp(cmd, "dump") == 0) {
-    MCP45HVX1::RegisterSnapshot s;
-    MCP45HVX1::Status st = gDev.readSnapshot(s);
-    printStatus("read", st);
-    if (st.ok()) {
-      printf("wiper=0x%02X tcon=0x%02X\n", s.wiper, s.tcon);
-    }
+  } else if (strcmp(cmd, "cfg") == 0 || strcmp(cmd, "settings") == 0) {
+    printConfigSnapshot();
+  } else if (strcmp(cmd, "detail") == 0) {
+    printConfigSnapshot();
+    printDriverHealth();
+  } else if (strcmp(cmd, "drv") == 0 || strcmp(cmd, "health") == 0) {
+    printDriverHealth();
+  } else if (strcmp(cmd, "state") == 0) {
+    printStateLine();
+  } else if (strcmp(cmd, "read") == 0 || strcmp(cmd, "rregs") == 0) {
+    readRegisters(false);
+  } else if (strcmp(cmd, "dump") == 0) {
+    readRegisters(true);
+  } else if (strcmp(cmd, "readwiper") == 0) {
+    readWiperCommand("readwiper");
+  } else if (strcmp(cmd, "readtcon") == 0) {
+    readTconCommand("readtcon");
   } else if (strcmp(cmd, "last") == 0) {
     uint8_t v = 0;
     MCP45HVX1::Status st = gDev.readLastAddress(v);
@@ -543,7 +824,7 @@ void handleCommand(char* line) {
     if (st.ok()) {
       printf("last=0x%02X\n", v);
     }
-  } else if (strcmp(cmd, "rreg") == 0) {
+  } else if (strcmp(cmd, "rreg") == 0 || strcmp(cmd, "reg") == 0) {
     uint32_t reg = 0;
     uint8_t value = 0;
     MCP45HVX1::Status st = parseU32(args, &reg)
@@ -555,36 +836,77 @@ void handleCommand(char* line) {
     }
   } else if (strcmp(cmd, "wiper") == 0) {
     uint32_t v = 0;
-    if (parseU32(args, &v)) {
-      printStatus("wiper", gDev.writeWiper(static_cast<uint8_t>(v)));
-    } else {
-      uint8_t code = 0;
-      MCP45HVX1::Status st = gDev.readWiper(code);
-      printStatus("wiper", st);
-      if (st.ok()) {
-        printf("wiper=0x%02X\n", code);
+    if (strncmp(args, "percent ", 8) == 0) {
+      float percent = 0.0f;
+      if (parseFloatArg(args + 8, &percent) && percent >= 0.0f && percent <= 100.0f) {
+        puts("WARNING: wiper percent changes the analog output state.");
+        printStatus("wiper percent", gDev.writeWiperFraction(percent / 100.0f));
+        readWiperCommand("readwiper");
+      } else {
+        puts("Usage: wiper percent <0..100>");
       }
+    } else if (strncmp(args, "fraction ", 9) == 0) {
+      float fraction = 0.0f;
+      if (parseFloatArg(args + 9, &fraction) && fraction >= 0.0f && fraction <= 1.0f) {
+        puts("WARNING: wiper fraction changes the analog output state.");
+        printStatus("wiper fraction", gDev.writeWiperFraction(fraction));
+        readWiperCommand("readwiper");
+      } else {
+        puts("Usage: wiper fraction <0.0..1.0>");
+      }
+    } else if (parseU32(args, &v)) {
+      puts("WARNING: wiper changes the analog output state.");
+      printStatus("wiper", gDev.writeWiper(static_cast<uint8_t>(v)));
+      readWiperCommand("readwiper");
+    } else {
+      readWiperCommand("wiper");
     }
   } else if (strcmp(cmd, "zero") == 0 || strcmp(cmd, "mid") == 0 || strcmp(cmd, "max") == 0) {
     const uint8_t max = MCP45HVX1::MCP45HVX1::maxWiperCode(gCfg.resolution);
     const uint8_t v = (strcmp(cmd, "zero") == 0) ? 0U : (strcmp(cmd, "mid") == 0 ? max / 2U : max);
+    puts("WARNING: wiper preset changes the analog output state.");
     printStatus(cmd, gDev.writeWiper(v));
   } else if (strcmp(cmd, "inc") == 0 || strcmp(cmd, "dec") == 0) {
     uint32_t n = 1;
     (void)parseU32(args, &n);
+    puts("WARNING: wiper step changes the analog output state.");
     printStatus(cmd, strcmp(cmd, "inc") == 0 ? gDev.incrementWiper(static_cast<uint8_t>(n))
                                               : gDev.decrementWiper(static_cast<uint8_t>(n)));
   } else if (strcmp(cmd, "tcon") == 0) {
     uint32_t v = 0;
-    if (parseU32(args, &v)) {
+    if (strcmp(args, "default") == 0) {
+      puts("WARNING: tcon default changes terminal state.");
+      printStatus("tcon default", gDev.writeTcon(MCP45HVX1::cmd::TCON_DEFAULT));
+      readTconCommand("readtcon");
+    } else if (parseU32(args, &v)) {
+      puts("WARNING: tcon changes terminal state.");
       printStatus("tcon", gDev.writeTcon(static_cast<uint8_t>(v)));
+      readTconCommand("readtcon");
     } else {
-      uint8_t tcon = 0;
-      MCP45HVX1::Status st = gDev.readTcon(tcon);
-      printStatus("tcon", st);
-      if (st.ok()) {
-        printf("tcon=0x%02X\n", tcon);
+      readTconCommand("tcon");
+    }
+  } else if (strcmp(cmd, "raw") == 0) {
+    if (*args == '\0') {
+      readRegisters(true);
+    } else if (strncmp(args, "write ", 6) == 0) {
+      char local[LINE_LEN];
+      snprintf(local, sizeof(local), "%s", args + 6);
+      char* valueText = strchr(local, ' ');
+      uint32_t reg = 0;
+      uint32_t value = 0;
+      if (valueText != nullptr) {
+        *valueText++ = '\0';
+        valueText = trim(valueText);
       }
+      puts("DANGER: raw write may affect live hardware.");
+      printStatus("raw write",
+                  (valueText != nullptr && parseU32(local, &reg) && parseU32(valueText, &value))
+                      ? gDev.writeRegister(static_cast<uint8_t>(reg),
+                                           static_cast<uint8_t>(value))
+                      : MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM,
+                                                 "usage: raw write <reg> <value>"));
+    } else {
+      puts("Usage: raw [write <reg> <value>]");
     }
   } else if (strcmp(cmd, "wreg") == 0 || strcmp(cmd, "wregs") == 0) {
     char local[LINE_LEN];
@@ -596,6 +918,7 @@ void handleCommand(char* line) {
       *valueText++ = '\0';
       valueText = trim(valueText);
     }
+    puts("DANGER: raw register write may affect live hardware.");
     printStatus(cmd, (valueText != nullptr && parseU32(local, &reg) && parseU32(valueText, &value))
                          ? gDev.writeRegister(static_cast<uint8_t>(reg),
                                               static_cast<uint8_t>(value))
@@ -604,7 +927,9 @@ void handleCommand(char* line) {
   } else if (strcmp(cmd, "frac") == 0 || strcmp(cmd, "pos") == 0) {
     float fraction = 0.0f;
     if (parseFloatArg(args, &fraction)) {
+      puts("WARNING: fraction write changes the analog output state.");
       printStatus(cmd, gDev.writeWiperFraction(fraction));
+      readWiperCommand("readwiper");
     } else {
       MCP45HVX1::Status st = gDev.readWiperFraction(fraction);
       printStatus(cmd, st);
@@ -626,7 +951,7 @@ void handleCommand(char* line) {
     printInfo();
   } else if (strcmp(cmd, "errata") == 0) {
     printErrata();
-  } else if (strcmp(cmd, "term") == 0) {
+  } else if (strcmp(cmd, "term") == 0 || strcmp(cmd, "terminal") == 0) {
     char local[LINE_LEN];
     snprintf(local, sizeof(local), "%s", args);
     char* valueText = strchr(local, ' ');
@@ -635,9 +960,13 @@ void handleCommand(char* line) {
       valueText = trim(valueText);
     }
     MCP45HVX1::Terminal terminal{};
-    uint32_t enabled = 0;
-    if (valueText != nullptr && parseTerminal(local, &terminal) && parseU32(valueText, &enabled)) {
-      printStatus("term", gDev.setTerminalEnabled(terminal, enabled != 0U));
+    bool enabled = false;
+    uint32_t enabledInt = 0;
+    if (valueText != nullptr && parseTerminal(local, &terminal) &&
+        (parseBoolArg(valueText, &enabled) ||
+         (parseU32(valueText, &enabledInt) && ((enabled = enabledInt != 0U), true)))) {
+      puts("WARNING: terminal command changes TCON terminal connectivity.");
+      printStatus(cmd, gDev.setTerminalEnabled(terminal, enabled));
     } else if (parseTerminal(local, &terminal)) {
       bool enabledFlag = false;
       MCP45HVX1::Status st = gDev.getTerminalEnabled(terminal, enabledFlag);
@@ -656,14 +985,17 @@ void handleCommand(char* line) {
                status.terminalB ? 1 : 0);
       }
     }
-  } else if (strcmp(cmd, "shutdown") == 0) {
-    uint32_t enabled = 0;
-    if (parseU32(args, &enabled)) {
-      printStatus("shutdown", gDev.setSoftwareShutdown(enabled != 0U));
+  } else if (strcmp(cmd, "shutdown") == 0 || strcmp(cmd, "software-shutdown") == 0) {
+    bool enabled = false;
+    uint32_t enabledInt = 0;
+    if (parseBoolArg(args, &enabled) ||
+        (parseU32(args, &enabledInt) && ((enabled = enabledInt != 0U), true))) {
+      puts("WARNING: shutdown command changes TCON terminal connectivity.");
+      printStatus(cmd, gDev.setSoftwareShutdown(enabled));
     } else {
       bool isShutdown = false;
       MCP45HVX1::Status st = gDev.getSoftwareShutdown(isShutdown);
-      printStatus("shutdown", st);
+      printStatus(cmd, st);
       if (st.ok()) {
         printf("shutdown=%d\n", isShutdown ? 1 : 0);
       }
@@ -671,6 +1003,7 @@ void handleCommand(char* line) {
   } else if (strcmp(cmd, "mode") == 0) {
     MCP45HVX1::TerminalMode mode{};
     if (parseTerminalMode(args, &mode)) {
+      puts("WARNING: mode command changes TCON terminal connectivity.");
       printStatus("mode", gDev.setTerminalMode(mode));
     } else {
       MCP45HVX1::Status st = gDev.getTerminalMode(mode);
@@ -682,14 +1015,28 @@ void handleCommand(char* line) {
   } else if (strcmp(cmd, "gc") == 0) {
     handleGc(args);
   } else if (strcmp(cmd, "selftest") == 0) {
+    if (strcmp(args, "output") == 0) {
+      puts("WARNING: selftest output is operator-requested; native checks remain state-restoring.");
+    } else if (*args != '\0' && strcmp(args, "safe") != 0) {
+      puts("Usage: selftest [safe|output]");
+      return;
+    }
     runSelftest();
   } else if (strcmp(cmd, "stress") == 0 || strcmp(cmd, "stress_mix") == 0) {
     uint32_t count = 10;
     (void)parseU32(args, &count);
-    runStress(count);
+    runStress(count, strcmp(cmd, "stress_mix") == 0);
   } else if (strcmp(cmd, "verbose") == 0) {
-    gVerbose = (strcmp(args, "1") == 0) || (!gVerbose && *args == '\0');
-    printf("verbose=%d\n", gVerbose ? 1 : 0);
+    bool enabled = false;
+    if (*args == '\0') {
+      gVerbose = !gVerbose;
+      printf("verbose=%d\n", gVerbose ? 1 : 0);
+    } else if (parseBoolArg(args, &enabled)) {
+      gVerbose = enabled;
+      printf("verbose=%d\n", gVerbose ? 1 : 0);
+    } else {
+      puts("Usage: verbose [0|1|on|off]");
+    }
   } else {
     puts("Unknown command. Try 'help'.");
   }

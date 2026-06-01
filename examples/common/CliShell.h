@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "examples/common/CliStyle.h"
 #include "Log.h"
 
 namespace cli_shell {
@@ -33,10 +34,11 @@ inline bool readLine(String& outLine) {
         buffer = "";
         overflowed = false;
         LOGW("line too long");
-        LOG_SERIAL.print("> ");
+        cli::printPrompt();
         continue;
       }
       if (buffer.length() == 0U) {
+        cli::printPrompt();
         continue;
       }
       outLine = buffer;

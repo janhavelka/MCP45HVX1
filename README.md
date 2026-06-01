@@ -13,7 +13,7 @@ ESP32 (Arduino/PlatformIO and ESP-IDF).
 - **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames, with explicit `GCEN` caveats
 - **Bus-interface reset hook** - optional board callback for the documented software-reset/bus-release sequence
 - **Variant helpers** - 7-bit/8-bit code limits, terminal-current limits, nominal resistance, and position conversion helpers
-- **Comprehensive bring-up CLI** - register, terminal, General Call, defaults, and stress commands
+- **Comprehensive bring-up CLI** - colored diagnostics, safe read-only stress, explicit output-changing commands, and General Call gating
 - **Deterministic behavior** - no heap allocation in the core driver
 - **Settings snapshot** - runtime config, cache, and health counters
 - **Native tests** - fake-bus protocol tests for register and command behavior
@@ -65,6 +65,10 @@ Hardware smoke tests are still pending until target devices are available.
 
 MCP45HVX1::MCP45HVX1 pot;
 
+uint32_t nowMs(void*) {
+  return millis();
+}
+
 void setup() {
   Wire.begin(8, 9);
   Wire.setClock(400000);
@@ -74,6 +78,7 @@ void setup() {
   cfg.i2cWrite = transport::wireWrite;
   cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cUser = &Wire;
+  cfg.nowMs = nowMs;
   cfg.i2cAddress = 0x3C;
   cfg.resolution = MCP45HVX1::Resolution::Bits8; // MCP45HV51
 
@@ -232,7 +237,14 @@ tolerance, wiper resistance, leakage, INL/DNL, or board-level loading.
 Interactive serial CLI with commands for bus scan, begin/reconfigure,
 probe/recover, settings, Wiper/TCON reads and writes, direct register access,
 terminal modes, General Call frames, volatile defaults, I2C interface reset, and
-stress passes.
+safe/default stress passes.
+
+The CLI starts in safe mode. `selftest` and `stress [N]` are read-only or
+state-restoring and do not intentionally leave Wiper/TCON changed. Commands that
+can affect a live analog/high-voltage circuit print warnings before issuing the
+write. Use explicit commands such as `selftest output`, `stress_mix [N]`,
+`raw write <reg> <value>`, or `gc arm` plus `gc ...` for output-changing or
+bus-wide operations.
 
 The CLI follows the same line-oriented output style as the sibling I2C
 bring-up examples. Normal commands print compact sections and two-space
@@ -250,49 +262,55 @@ indented rows:
   Terminals: A=yes W=yes B=yes
 ```
 
-Use `drv` for the one-line health summary and `detail`, `cfg`, or `settings`
-for the detailed health/config/cache view. Raw hardware-oriented output is
-kept behind explicit commands: `raw`/`dump` adds the last-address pointer and
-`rreg`/`last` read direct register/pointer values. `verbose 1` enables
-per-operation details during long-running diagnostics; default output remains
-compact.
+Use `state` for the parseable one-line state summary, `drv` or `health` for
+detailed driver health, and `detail`, `cfg`, or `settings` for configuration and
+cache snapshots. Raw hardware-oriented output is kept behind explicit commands:
+`raw`/`dump` adds the last-address pointer, `reg`/`rreg` read direct registers,
+and `raw write`/`wreg` write volatile registers. `color off` disables ANSI escape
+codes for logs, and `verbose on` enables per-operation details during
+long-running diagnostics.
 
-Stress commands report progress at fixed intervals and finish with totals,
-timing, health-counter deltas, restore status, first/last failure detail when
+The default stress command is read-only and reports progress at fixed intervals
+with totals, timing, health-counter deltas, first/last failure detail when
 applicable, and a final health line:
 
 ```text
-[I] Starting stress test: 8 iterations, 16 operations
-  Progress: 8/16 (50%, ok=8, fail=0)
+[I] Starting read-only stress: 8 iterations, 24 operations
+  Progress: 12/24 (50%, ok=12, fail=0)
 === Stress Summary ===
   Test: stress
   Target: 8 iterations
-  Mode: increment/decrement restore
-  Attempts: 16/16
-  Success: 16
+  Mode: read-only probe/readWiper/readTCON
+  Output changes: no
+  Attempts: 24/24
+  Success: 24
   Errors: 0
   Success rate: 100.00%
-  Restore: PASS
+  Restore: not needed
   Result: PASS
 ```
 
-ANSI color is applied only to status, warning, pass/fail, and counter tokens
-through the shared `Log.h`/`CliStyle.h` helpers. Plain serial logs remain
-readable if escape codes are stripped or the color macros are compiled to empty
-strings. To capture diagnostics for a failure, run `scan`, `probe`, `read`,
-`drv`, `detail`, the failing command, and then `verbose 1` plus `stress [N]`
-or `stress_mix [N]` if the issue is intermittent.
+ANSI color is enabled by default and applied only to status, warning, pass/fail,
+and counter tokens through the shared `Log.h`/`CliStyle.h` helpers. Disable it
+at runtime with `color off` or at compile time with
+`-DMCP45HVX1_CLI_ENABLE_COLOR=0`; plain serial logs remain readable either way.
+To capture diagnostics for a failure, run `scan`, `probe`, `read`, `state`,
+`drv`, `detail`, the failing command, and then `verbose on` plus `stress [N]`.
 
 Typical commands:
 
 ```text
 scan
+color off
 cfg
+state
+drv
 read
 wiper 0x80
+wiper percent 50
 frac 0.5
 mode bw
-term a 0
+terminal a off
 tcon 0xFF
 gc arm
 gc inc
@@ -339,6 +357,7 @@ idf.py build
 - <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
+- <a href="docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md">CLI Parity And Color Report</a>
 - <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
 - <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
