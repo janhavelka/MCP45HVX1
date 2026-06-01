@@ -86,4 +86,3 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
 }
 
 }  // namespace health_view
-

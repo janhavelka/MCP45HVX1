@@ -42,12 +42,11 @@ inline MCP45HVX1::Status mapWireResult(uint8_t result, const char* context) {
 
 inline MCP45HVX1::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
                                    uint32_t timeoutMs, void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
+  (void)timeoutMs;
   if (data == nullptr || len == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C write params");
   }
@@ -69,12 +68,11 @@ inline MCP45HVX1::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
 inline MCP45HVX1::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
                                        uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
                                        void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
+  (void)timeoutMs;
   if ((txLen > 0 && tx == nullptr) || rx == nullptr || rxLen == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C read params");
   }

@@ -5,7 +5,6 @@
 
 #include "MCP45HVX1/MCP45HVX1.h"
 
-#include <Arduino.h>
 #include <cstring>
 #include <limits>
 
@@ -253,18 +252,10 @@ Status MCP45HVX1::resetI2cState() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
-  if (_config.busReset == nullptr) {
-    return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
-  }
-
   const bool startedOffline = _driverState == DriverState::OFFLINE;
-  Status st = _config.busReset(_config.controlUser);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
-      st.code == Err::UNSUPPORTED) {
-    return st;
-  }
+  Status st = _busResetTracked(!startedOffline);
   if (!st.ok()) {
-    return _updateHealth(st);
+    return st;
   }
 
   _addressPointerKnown = false;
@@ -272,7 +263,7 @@ Status MCP45HVX1::resetI2cState() {
   if (startedOffline) {
     return st;
   }
-  return _updateHealth(st);
+  return st;
 }
 
 Status MCP45HVX1::restorePowerOnDefaults() {
@@ -664,6 +655,21 @@ Status MCP45HVX1::_i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len)
   return _updateHealth(st);
 }
 
+Status MCP45HVX1::_busResetTracked(bool trackSuccess) {
+  if (_config.busReset == nullptr) {
+    return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
+  }
+  Status st = _config.busReset(_config.controlUser);
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
+      st.code == Err::UNSUPPORTED) {
+    return st;
+  }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
+  return trackSuccess ? _updateHealth(st) : st;
+}
+
 // ===========================================================================
 // Register Helpers
 // ===========================================================================
@@ -1036,7 +1042,7 @@ uint32_t MCP45HVX1::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
   }
-  return millis();
+  return 0U;
 }
 
 }  // namespace MCP45HVX1

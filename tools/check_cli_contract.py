@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import runpy
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -66,6 +67,23 @@ MANDATORY_COMMANDS = [
     "stress",
     "stress_mix",
 ]
+GENERAL_CALL_SUBCOMMANDS = ["arm", "disarm", "wiper", "tcon", "inc", "dec"]
+GENERAL_CALL_IDF_TOKENS = [
+    "addr == 0x00U",
+    "transmitWithManualAddress",
+    "I2C_DEVICE_ADDRESS_NOT_USED",
+    "addressByte = static_cast<uint8_t>(addr << 1)",
+    "i2c_master_execute_defined_operations",
+]
+
+IDF_REQUIRED_COMPONENTS = [
+    "MCP45HVX1",
+    "esp_driver_i2c",
+    "esp_driver_gpio",
+    "esp_timer",
+    "freertos",
+    "vfs",
+]
 
 
 def fail(msg: str) -> None:
@@ -83,12 +101,21 @@ def ensure_missing(path: pathlib.Path, label: str) -> None:
         fail(f"forbidden {label} still present: {path.as_posix()}")
 
 
+def require_token(text: str, token: str, label: str) -> None:
+    if token not in text:
+        fail(f"{label} missing token '{token}'")
+
+
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
+    idf_main = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
+    idf_cmake = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
 
     ensure_exists(common_dir, "common example directory")
     ensure_exists(bringup_main, "bringup CLI example")
+    ensure_exists(idf_main, "ESP-IDF bringup entry point")
+    ensure_exists(idf_cmake, "ESP-IDF bringup CMake file")
 
     ensure_missing(ROOT / "examples" / "00_smoke_boot", "deprecated example 00_smoke_boot")
     ensure_missing(
@@ -114,6 +141,28 @@ def main() -> int:
 
     if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
         fail("either 'cfg' or 'settings' command must be present")
+
+    for subcommand in GENERAL_CALL_SUBCOMMANDS:
+        help_re = re.compile(rf"\bgc\s+{re.escape(subcommand)}\b")
+        dispatch_re = re.compile(
+            rf'strcmp\s*\(\s*sub\s*,\s*"{re.escape(subcommand)}"\s*\)\s*==\s*0'
+        )
+        if help_re.search(text) is None:
+            fail(f"General Call subcommand 'gc {subcommand}' missing from help/usage text")
+        if dispatch_re.search(text) is None:
+            fail(f"General Call subcommand '{subcommand}' missing from dispatch")
+
+    idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
+    if 'extern "C" void app_main(void)' not in idf_text:
+        fail("ESP-IDF entry point must define app_main()")
+
+    cmake_text = idf_cmake.read_text(encoding="utf-8", errors="replace")
+    for component in IDF_REQUIRED_COMPONENTS:
+        if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
+            fail(f"ESP-IDF CMake file missing required component '{component}'")
+
+    idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
+    idf_contract["main"]()
 
     print("CLI contract PASSED")
     return 0

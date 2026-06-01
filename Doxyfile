@@ -31,11 +31,11 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md ASSUMPTIONS.md MCP45HVX1_digital_potentiometer_implementation_manual.md include
-FILE_PATTERNS          = *.h *.md
+INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md ASSUMPTIONS.md MCP45HVX1_digital_potentiometer_implementation_manual.md include docs/IDF_PORT.md docs/IDF_PORT_IMPLEMENTATION.md examples/common examples/01_basic_bringup_cli examples/espidf_basic
+FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/extracted-md/* */docs/pdf-extracted-md/* */docs/_pdf_extracts/*
-EXAMPLE_PATH           = examples/01_basic_bringup_cli
+EXAMPLE_PATH           = examples/01_basic_bringup_cli examples/espidf_basic examples/common
 
 USE_MDFILE_AS_MAINPAGE = README.md
 FULL_PATH_NAMES        = NO

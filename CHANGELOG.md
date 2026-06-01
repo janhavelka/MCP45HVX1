@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build
+  of the full bring-up CLI command contract.
+- ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
+- Core health timestamps now come only from injected `Config::nowMs`; framework
+  time sources live in examples/application glue.
+- `library.json` now declares both `arduino` and `espidf` framework support.
+- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino
+  CLI source, and native IDF entry point.
+- The ESP-IDF example adapter now sends General Call address `0x00` through
+  ESP-IDF defined I2C operations with manual address bytes instead of relying on
+  normal device-handle addressing for a reserved address.
+- `tools/check_idf_example_contract.py` validates the native ESP-IDF boundary,
+  required CMake dependencies, General Call CLI subcommands, and manual-address
+  General Call path.
+- The ESP-IDF CLI parity is checked through repo-local command contracts;
+  hardware validation remains pending until target hardware is available.
 - Latched `OFFLINE` behavior for normal public I2C operations. Once the health
   threshold is reached, normal operations return `BUSY` with
   `Driver is offline; call recover()` and do not touch the bus until
