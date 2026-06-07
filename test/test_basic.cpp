@@ -45,6 +45,8 @@ struct FakeBus {
 
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
+  int writeErrorAfterMutationRemaining = 0;
+  uint8_t failAfterAppliedCommands = 0;
   uint32_t failReadCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
@@ -181,14 +183,34 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
 
   if (addr == cmd::GENERAL_CALL_ADDRESS) {
     bus->generalCallWrites++;
-    return applyGeneralCall(bus, data, len);
+    Status st = applyGeneralCall(bus, data, len);
+    if (!st.ok()) {
+      return st;
+    }
+    if (bus->writeErrorAfterMutationRemaining > 0) {
+      bus->writeErrorAfterMutationRemaining--;
+      return bus->writeError;
+    }
+    return Status::Ok();
   }
 
+  uint8_t appliedCommands = 0;
   for (size_t i = 0; i < len; ++i) {
     Status st = applyCommand(bus, data[i], data, i, len);
     if (!st.ok()) {
       return st;
     }
+    ++appliedCommands;
+    if (bus->writeErrorAfterMutationRemaining > 0 &&
+        bus->failAfterAppliedCommands > 0 &&
+        appliedCommands >= bus->failAfterAppliedCommands) {
+      bus->writeErrorAfterMutationRemaining--;
+      return bus->writeError;
+    }
+  }
+  if (bus->writeErrorAfterMutationRemaining > 0) {
+    bus->writeErrorAfterMutationRemaining--;
+    return bus->writeError;
   }
   return Status::Ok();
 }
@@ -732,6 +754,149 @@ void test_general_call_helpers() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
+void test_write_wiper_pre_mutation_failure_does_not_set_uncertainty() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_ADDR, "address not acknowledged", -7);
+  Status st = dev.writeWiper(0x55);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_8BIT, bus.wiper);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+}
+
+void test_write_wiper_mutate_then_fail_marks_uncertain() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_ERROR, "write failed after mutation", -11);
+  Status st = dev.writeWiper(0x55);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x55, bus.wiper);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+  TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(dev.hardwareStateUncertainError().code));
+}
+
+void test_write_tcon_mutate_then_fail_marks_uncertain() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_BUS, "bus failed after mutation", -12);
+  Status st = dev.writeTcon(0x07);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+}
+
+void test_increment_decrement_partial_failure_marks_uncertain() {
+  FakeBus bus;
+  bus.wiper = 0x10;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.failAfterAppliedCommands = 1;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "timeout after first increment", -13);
+  Status st = dev.incrementWiper(3);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x11, bus.wiper);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.failAfterAppliedCommands = 1;
+  bus.writeError = Status::Error(Err::I2C_ERROR, "failure after first decrement", -14);
+  st = dev.decrementWiper(3);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x10, bus.wiper);
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
+}
+
+void test_general_call_mutate_then_fail_marks_uncertain() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_BUS, "general call failed after mutation", -15);
+  Status st = dev.generalCallWriteWiper(0x44);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+}
+
+void test_successful_readback_clears_uncertainty_only_after_all_unknown_verified() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_ERROR, "wiper fail after mutation", -16);
+  TEST_ASSERT_FALSE(dev.writeWiper(0x33).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_ERROR, "tcon fail after mutation", -17);
+  TEST_ASSERT_FALSE(dev.writeTcon(0x07).ok());
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+
+  TEST_ASSERT_TRUE(dev.readTcon(value).ok());
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OK),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+}
+
 void test_probe_does_not_update_health_but_recover_does() {
   FakeBus bus;
   Driver dev;
@@ -1066,6 +1231,12 @@ int main() {
   RUN_TEST(test_i2c_reset_and_restore_defaults);
   RUN_TEST(test_i2c_reset_reports_unsupported_without_callback);
   RUN_TEST(test_general_call_helpers);
+  RUN_TEST(test_write_wiper_pre_mutation_failure_does_not_set_uncertainty);
+  RUN_TEST(test_write_wiper_mutate_then_fail_marks_uncertain);
+  RUN_TEST(test_write_tcon_mutate_then_fail_marks_uncertain);
+  RUN_TEST(test_increment_decrement_partial_failure_marks_uncertain);
+  RUN_TEST(test_general_call_mutate_then_fail_marks_uncertain);
+  RUN_TEST(test_successful_readback_clears_uncertainty_only_after_all_unknown_verified);
   RUN_TEST(test_probe_does_not_update_health_but_recover_does);
   RUN_TEST(test_probe_preserves_register_mismatch);
   RUN_TEST(test_offline_threshold);

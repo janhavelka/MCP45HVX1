@@ -15,7 +15,7 @@ ESP32 (Arduino/PlatformIO and ESP-IDF).
 - **Variant helpers** - 7-bit/8-bit code limits, terminal-current limits, nominal resistance, and position conversion helpers
 - **Comprehensive bring-up CLI** - colored diagnostics, safe read-only stress, explicit output-changing commands, and General Call gating
 - **Deterministic behavior** - no heap allocation in the core driver
-- **Settings snapshot** - runtime config, cache, and health counters
+- **Settings snapshot** - runtime config, cache, uncertainty, and health counters
 - **Native tests** - fake-bus protocol tests for register and command behavior
 
 ## Installation
@@ -115,6 +115,8 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback
 - `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
+- `bool hardwareStateUncertain()` - true after an ambiguous state-changing write failure until readback verifies affected state
+- `Status hardwareStateUncertainError()` - last ambiguous failure that set hardware uncertainty
 - `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, terminal-current limit, defaults
 
 ### Wiper
@@ -166,6 +168,23 @@ General Call ACKs are broadcast and not device-specific, successful General Call
 helpers mark the affected local cache entry unknown; call `readSnapshot()` to
 verify local state afterward.
 
+## Uncertain Hardware State
+
+MCP45HVX1 Wiper and TCON writes can change real analog and high-voltage
+circuits. If a state-changing transaction reaches the I2C bus and then returns
+an ambiguous transport failure, the driver preserves the original `Status` and
+marks the affected cache unknown. `SettingsSnapshot::hardwareStateUncertain`
+and `hardwareStateUncertain()` remain true until successful readback verifies
+every affected volatile register.
+
+Validation failures before I2C access, unsupported commands, offline `BUSY`,
+device-not-found/register-mismatch results, and address NACKs do not set this
+flag. Generic I2C failures, data NACKs, timeouts, and bus errors can mean bytes
+were accepted before the host observed failure, so they set uncertainty for the
+affected Wiper or TCON state. `resetI2cState()` does not clear uncertainty; use
+`readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` to perform real
+readback/resync.
+
 ## Configuration
 
 | Field | Default | Description |
@@ -204,6 +223,12 @@ health counters. `resetI2cState()` may run the configured bus-reset callback but
 does not by itself mark the device recovered while already OFFLINE. Call
 `recover()` to perform tracked Wiper/TCON reads, refresh caches, and return to
 READY on success.
+
+Hardware uncertainty is separate from `DriverState`. A device can be READY while
+the analog state is still uncertain after an ambiguous failed Wiper/TCON or
+General Call write. Inspect `cachedWiperKnown`, `cachedTconKnown`,
+`hardwareStateUncertain`, and `hardwareStateUncertainError` before trusting the
+physical output after a write failure.
 
 ## Device Notes
 
@@ -262,9 +287,11 @@ indented rows:
   Terminals: A=yes W=yes B=yes
 ```
 
-Use `state` for the parseable one-line state summary, `drv` or `health` for
-detailed driver health, and `detail`, `cfg`, or `settings` for configuration and
-cache snapshots. Raw hardware-oriented output is kept behind explicit commands:
+Use `state` for the parseable one-line state summary, including
+`uncertain=yes/no`; `drv` or `health` for detailed driver health and the last
+uncertainty error; and `detail`, `cfg`, or `settings` for configuration and
+explicit Wiper/TCON cache-known flags. Raw hardware-oriented output is kept
+behind explicit commands:
 `raw`/`dump` adds the last-address pointer, `reg`/`rreg` read direct registers,
 and `raw write`/`wreg` write volatile registers. `color off` disables ANSI escape
 codes for logs, and `verbose on` enables per-operation details during

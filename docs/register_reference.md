@@ -53,6 +53,9 @@ available source notes.
 
 Successful General Call helpers mark the affected local cache entry unknown
 because an ACK is broadcast and not device-specific.
+If a General Call helper returns an ambiguous transport failure after the bus
+transaction was attempted, the affected cache is also marked unknown and core
+hardware uncertainty is set until readback verifies the volatile state.
 
 ## TCON0
 

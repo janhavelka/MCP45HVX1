@@ -205,14 +205,6 @@ MCP45HVX1::Status resetBus(void*) {
                    : MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_BUS, "I2C reinit failed");
 }
 
-void printStatus(const char* op, MCP45HVX1::Status st) {
-  printf("%s: %s (code=%u detail=%ld)\n", op, st.ok() ? "OK" : "FAIL",
-         static_cast<unsigned>(st.code), static_cast<long>(st.detail));
-  if (!st.ok() && st.msg != nullptr) {
-    printf("  %s\n", st.msg);
-  }
-}
-
 char* trim(char* text) {
   while (*text != '\0' && isspace(static_cast<unsigned char>(*text))) {
     ++text;
@@ -292,8 +284,42 @@ const char* stateName(MCP45HVX1::DriverState state) {
   }
 }
 
+const char* errName(MCP45HVX1::Err code) {
+  switch (code) {
+    case MCP45HVX1::Err::OK: return "OK";
+    case MCP45HVX1::Err::NOT_INITIALIZED: return "NOT_INITIALIZED";
+    case MCP45HVX1::Err::INVALID_CONFIG: return "INVALID_CONFIG";
+    case MCP45HVX1::Err::I2C_ERROR: return "I2C_ERROR";
+    case MCP45HVX1::Err::TIMEOUT: return "TIMEOUT";
+    case MCP45HVX1::Err::INVALID_PARAM: return "INVALID_PARAM";
+    case MCP45HVX1::Err::DEVICE_NOT_FOUND: return "DEVICE_NOT_FOUND";
+    case MCP45HVX1::Err::REGISTER_MISMATCH: return "REGISTER_MISMATCH";
+    case MCP45HVX1::Err::BUSY: return "BUSY";
+    case MCP45HVX1::Err::IN_PROGRESS: return "IN_PROGRESS";
+    case MCP45HVX1::Err::UNSUPPORTED: return "UNSUPPORTED";
+    case MCP45HVX1::Err::I2C_NACK_ADDR: return "I2C_NACK_ADDR";
+    case MCP45HVX1::Err::I2C_NACK_DATA: return "I2C_NACK_DATA";
+    case MCP45HVX1::Err::I2C_TIMEOUT: return "I2C_TIMEOUT";
+    case MCP45HVX1::Err::I2C_BUS: return "I2C_BUS";
+    default: return "UNKNOWN";
+  }
+}
+
+void printStatus(const char* op, MCP45HVX1::Status st) {
+  printf("%s: %s (%s code=%u detail=%ld)\n", op, st.ok() ? "OK" : "FAIL",
+         errName(st.code), static_cast<unsigned>(st.code), static_cast<long>(st.detail));
+  if (!st.ok() && st.msg != nullptr) {
+    printf("  %s\n", st.msg);
+  }
+}
+
 const char* variantName(MCP45HVX1::Resolution resolution) {
   return resolution == MCP45HVX1::Resolution::Bits7 ? "MCP45HV31" : "MCP45HV51";
+}
+
+bool hardwareStateUncertain(const MCP45HVX1::SettingsSnapshot& s) {
+  return s.hardwareStateUncertain || !s.cachedWiperKnown || !s.cachedTconKnown ||
+         !gDev.isOnline();
 }
 
 bool parseResolutionText(const char* text, MCP45HVX1::Resolution* out) {
@@ -437,23 +463,29 @@ void scanBus() {
 }
 
 void printDrv() {
-  printf("state=%s initialized=%d online=%d ok=%lu fail=%lu consecutive=%u\n",
-         stateName(gDev.state()), gDev.isInitialized() ? 1 : 0,
-         gDev.isOnline() ? 1 : 0, static_cast<unsigned long>(gDev.totalSuccess()),
-         static_cast<unsigned long>(gDev.totalFailures()),
-         static_cast<unsigned>(gDev.consecutiveFailures()));
+  MCP45HVX1::SettingsSnapshot s{};
+  (void)gDev.getSettings(s);
+  printf("state=%s initialized=%d online=%d uncertain=%d ok=%lu fail=%lu consecutive=%u last_uncertain_code=%u\n",
+         stateName(s.state), s.initialized ? 1 : 0,
+         gDev.isOnline() ? 1 : 0, hardwareStateUncertain(s) ? 1 : 0,
+         static_cast<unsigned long>(s.totalSuccess),
+         static_cast<unsigned long>(s.totalFailures),
+         static_cast<unsigned>(s.consecutiveFailures),
+         static_cast<unsigned>(s.hardwareStateUncertainError.code));
 }
 
 void printStateLine() {
   const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
-  const MCP45HVX1::Status last = gDev.lastError();
-  printf("state=%s initialized=%d online=%d addr=0x%02X variant=%s ok=%lu fail=%lu consecutive=%u last_code=%u\n",
-         stateName(gDev.state()), gDev.isInitialized() ? 1 : 0, gDev.isOnline() ? 1 : 0,
+  MCP45HVX1::SettingsSnapshot s{};
+  (void)gDev.getSettings(s);
+  printf("state=%s initialized=%d online=%d uncertain=%d addr=0x%02X variant=%s ok=%lu fail=%lu consecutive=%u last_code=%u\n",
+         stateName(s.state), s.initialized ? 1 : 0, gDev.isOnline() ? 1 : 0,
+         hardwareStateUncertain(s) ? 1 : 0,
          info.i2cAddress, variantName(info.resolution),
-         static_cast<unsigned long>(gDev.totalSuccess()),
-         static_cast<unsigned long>(gDev.totalFailures()),
-         static_cast<unsigned>(gDev.consecutiveFailures()),
-         static_cast<unsigned>(last.code));
+         static_cast<unsigned long>(s.totalSuccess),
+         static_cast<unsigned long>(s.totalFailures),
+         static_cast<unsigned>(s.consecutiveFailures),
+         static_cast<unsigned>(s.lastError.code));
 }
 
 void printDriverHealth() {
@@ -471,6 +503,12 @@ void printDriverHealth() {
          static_cast<unsigned long>(s.lastErrorMs),
          static_cast<unsigned>(s.lastError.code),
          static_cast<long>(s.lastError.detail));
+  printf("  uncertainty aggregate=%d core=%d last_uncertain=%s code=%u detail=%ld\n",
+         hardwareStateUncertain(s) ? 1 : 0,
+         s.hardwareStateUncertain ? 1 : 0,
+         errName(s.hardwareStateUncertainError.code),
+         static_cast<unsigned>(s.hardwareStateUncertainError.code),
+         static_cast<long>(s.hardwareStateUncertainError.detail));
   printf("  cache wiper=%s 0x%02X tcon=%s 0x%02X pointer=%s 0x%02X\n",
          s.cachedWiperKnown ? "known" : "unknown", s.cachedWiper,
          s.cachedTconKnown ? "known" : "unknown", s.cachedTcon,
@@ -502,6 +540,11 @@ void printConfigSnapshot() {
          s.config.initialWiperCode,
          s.config.writeInitialTcon ? 1 : 0,
          s.config.initialTcon);
+  printf("cache_known wiper=%d tcon=%d uncertain=%d core_uncertain=%d\n",
+         s.cachedWiperKnown ? 1 : 0,
+         s.cachedTconKnown ? 1 : 0,
+         hardwareStateUncertain(s) ? 1 : 0,
+         s.hardwareStateUncertain ? 1 : 0);
 }
 
 void printErrata() {
@@ -605,6 +648,13 @@ void runStress(uint32_t count, bool mixed) {
     printf("stress_mix: ok=%lu fail=%lu restore_tcon=%s restore_wiper=%s\n",
            static_cast<unsigned long>(ok), static_cast<unsigned long>(fail),
            restoreTcon.ok() ? "OK" : "FAIL", restoreWiper.ok() ? "OK" : "FAIL");
+    MCP45HVX1::SettingsSnapshot s{};
+    (void)gDev.getSettings(s);
+    printf("stress_mix_uncertain=%d core_uncertain=%d last_uncertain=%s code=%u\n",
+           hardwareStateUncertain(s) ? 1 : 0,
+           s.hardwareStateUncertain ? 1 : 0,
+           errName(s.hardwareStateUncertainError.code),
+           static_cast<unsigned>(s.hardwareStateUncertainError.code));
     return;
   }
   for (uint32_t i = 0; i < count; ++i) {
@@ -642,6 +692,11 @@ void runStress(uint32_t count, bool mixed) {
   }
   printf("stress: ok=%lu fail=%lu\n", static_cast<unsigned long>(ok),
          static_cast<unsigned long>(fail));
+  MCP45HVX1::SettingsSnapshot s{};
+  (void)gDev.getSettings(s);
+  printf("stress_uncertain=%d core_uncertain=%d\n",
+         hardwareStateUncertain(s) ? 1 : 0,
+         s.hardwareStateUncertain ? 1 : 0);
 }
 
 void runSelftest() {

@@ -212,6 +212,16 @@ def main() -> int:
     if 'extern "C" void app_main(void)' not in idf_text:
         fail("ESP-IDF entry point must define app_main()")
 
+    for token in (
+        "uncertain=",
+        "hardwareStateUncertain",
+        "hardwareStateUncertainError",
+        "cachedWiperKnown",
+        "cachedTconKnown",
+    ):
+        require_token(text, token, "bringup CLI uncertainty output")
+        require_token(idf_text, token, "ESP-IDF CLI uncertainty output")
+
     cmake_text = idf_cmake.read_text(encoding="utf-8", errors="replace")
     for component in IDF_REQUIRED_COMPONENTS:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:

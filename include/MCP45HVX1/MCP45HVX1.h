@@ -86,6 +86,8 @@ struct SettingsSnapshot {
   uint32_t lastOkMs = 0;
   uint32_t lastErrorMs = 0;
   Status lastError = Status::Ok();
+  bool hardwareStateUncertain = false; ///< true when volatile hardware state needs readback
+  Status hardwareStateUncertainError = Status::Ok(); ///< Last ambiguous state-changing failure
   uint8_t consecutiveFailures = 0;
   uint32_t totalFailures = 0;
   uint32_t totalSuccess = 0;
@@ -192,6 +194,12 @@ public:
   /// @return Last tracked error status.
   Status lastError() const { return _lastError; }
 
+  /// @return true when Wiper/TCON hardware state may differ from verified readback state.
+  bool hardwareStateUncertain() const { return _hardwareStateUncertain; }
+
+  /// @return Last ambiguous state-changing failure that made hardware state uncertain.
+  Status hardwareStateUncertainError() const { return _hardwareStateUncertainError; }
+
   /// @return Current consecutive tracked failure count.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
 
@@ -212,17 +220,20 @@ public:
 
   /// Write volatile Wiper 0. Rejects codes outside the configured resolution.
   /// @param code New raw wiper code.
-  /// @return Status::Ok() after the write is ACKed and cached.
+  /// @return Status::Ok() after the write is ACKed and cached. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status writeWiper(uint8_t code);
 
   /// Increment volatile Wiper 0 by one or more steps.
   /// @param steps Number of increment commands to send; zero is a no-op.
-  /// @return Status::Ok() when all required step commands complete.
+  /// @return Status::Ok() when all required step commands complete. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status incrementWiper(uint8_t steps = 1);
 
   /// Decrement volatile Wiper 0 by one or more steps.
   /// @param steps Number of decrement commands to send; zero is a no-op.
-  /// @return Status::Ok() when all required step commands complete.
+  /// @return Status::Ok() when all required step commands complete. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status decrementWiper(uint8_t steps = 1);
 
   /// Convert a normalized 0.0-1.0 position to the nearest valid wiper code.
@@ -312,7 +323,8 @@ public:
 
   /// Write volatile TCON0. Reserved upper bits are forced to 1.
   /// @param value Requested TCON0 byte; reserved bits are sanitized before write.
-  /// @return Status::Ok() after the sanitized value is written and cached.
+  /// @return Status::Ok() after the sanitized value is written and cached. Ambiguous transport
+  /// failures mark the TCON cache unknown and set hardwareStateUncertain().
   Status writeTcon(uint8_t value);
 
   /// Configure one terminal's connection bit.
@@ -382,7 +394,8 @@ public:
   /// Write a documented volatile register directly.
   /// @param reg Register address; only writable volatile registers are accepted.
   /// @param value Raw value. TCON0 writes are sanitized.
-  /// @return Status::Ok() after the write is ACKed and cached.
+  /// @return Status::Ok() after the write is ACKed and cached. Ambiguous transport failures
+  /// mark affected volatile cache unknown and set hardwareStateUncertain().
   Status writeRegister(uint8_t reg, uint8_t value);
 
   /// Read the register addressed by the device's current address pointer.
@@ -447,6 +460,10 @@ private:
   static uint8_t _tconForMode(TerminalMode mode);
   void _syncRegister(uint8_t reg, uint8_t value);
   void _clearCachedRegisters();
+  static bool _isAmbiguousStateWriteFailure(const Status& st);
+  void _markHardwareStateUncertain(const Status& st, bool wiperAffected, bool tconAffected);
+  void _markRegisterReadbackVerified(uint8_t reg);
+  void _clearHardwareStateUncertainty();
 
   // Health management
   Status _offlineStatus() const;
@@ -462,6 +479,8 @@ private:
   uint32_t _lastOkMs = 0;
   uint32_t _lastErrorMs = 0;
   Status _lastError = Status::Ok();
+  bool _hardwareStateUncertain = false;
+  Status _hardwareStateUncertainError = Status::Ok();
   uint8_t _consecutiveFailures = 0;
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
@@ -470,6 +489,8 @@ private:
   uint8_t _cachedWiper = 0;
   bool _cachedTconKnown = false;
   uint8_t _cachedTcon = cmd::TCON_DEFAULT;
+  bool _wiperReadbackRequiredForUncertainty = false;
+  bool _tconReadbackRequiredForUncertainty = false;
   bool _addressPointerKnown = true;
   uint8_t _addressPointer = cmd::REG_WIPER0;
 };

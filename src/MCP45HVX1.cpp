@@ -40,6 +40,7 @@ Status MCP45HVX1::begin(const Config& config) {
   _totalFailures = 0;
   _totalSuccess = 0;
   _clearCachedRegisters();
+  _clearHardwareStateUncertainty();
   _addressPointerKnown = true;
   _addressPointer = cmd::REG_WIPER0;
 
@@ -54,6 +55,7 @@ Status MCP45HVX1::begin(const Config& config) {
     _totalFailures = 0;
     _totalSuccess = 0;
     _clearCachedRegisters();
+    _clearHardwareStateUncertainty();
     _addressPointerKnown = true;
     _addressPointer = cmd::REG_WIPER0;
     return failure;
@@ -156,6 +158,7 @@ void MCP45HVX1::end() {
   _totalFailures = 0;
   _totalSuccess = 0;
   _clearCachedRegisters();
+  _clearHardwareStateUncertainty();
   _addressPointerKnown = true;
   _addressPointer = cmd::REG_WIPER0;
 }
@@ -173,6 +176,8 @@ Status MCP45HVX1::getSettings(SettingsSnapshot& out) const {
   out.lastOkMs = _lastOkMs;
   out.lastErrorMs = _lastErrorMs;
   out.lastError = _lastError;
+  out.hardwareStateUncertain = _hardwareStateUncertain;
+  out.hardwareStateUncertainError = _hardwareStateUncertainError;
   out.consecutiveFailures = _consecutiveFailures;
   out.totalFailures = _totalFailures;
   out.totalSuccess = _totalSuccess;
@@ -234,6 +239,7 @@ Status MCP45HVX1::recover() {
     return st;
   }
   _syncRegister(cmd::REG_WIPER0, wiper);
+  _markRegisterReadbackVerified(cmd::REG_WIPER0);
 
   uint8_t tcon = 0;
   st = _readRegisterTracked(cmd::REG_TCON0, tcon);
@@ -244,6 +250,7 @@ Status MCP45HVX1::recover() {
     return st;
   }
   _syncRegister(cmd::REG_TCON0, tcon);
+  _markRegisterReadbackVerified(cmd::REG_TCON0);
 
   return Status::Ok();
 }
@@ -512,6 +519,7 @@ Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
     return st;
   }
   _syncRegister(reg, value);
+  _markRegisterReadbackVerified(reg);
   return Status::Ok();
 }
 
@@ -532,6 +540,9 @@ Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
   const uint8_t sanitized = (reg == cmd::REG_TCON0) ? sanitizeTcon(value) : value;
   Status st = _writeRegisterTracked(reg, sanitized);
   if (!st.ok()) {
+    if (_isAmbiguousStateWriteFailure(st)) {
+      _markHardwareStateUncertain(st, reg == cmd::REG_WIPER0, reg == cmd::REG_TCON0);
+    }
     return st;
   }
   _syncRegister(reg, sanitized);
@@ -563,6 +574,8 @@ Status MCP45HVX1::generalCallWriteWiper(uint8_t code) {
   Status st = _generalCallWrite(cmd::GC_WRITE_WIPER0, &code, 1);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
 }
@@ -576,6 +589,8 @@ Status MCP45HVX1::generalCallWriteTcon(uint8_t value) {
   Status st = _generalCallWrite(cmd::GC_WRITE_TCON0, &sanitized, 1);
   if (st.ok()) {
     _cachedTconKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, false, true);
   }
   return st;
 }
@@ -588,6 +603,8 @@ Status MCP45HVX1::generalCallIncrementWiper() {
   Status st = _generalCallWrite(cmd::GC_INCREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
 }
@@ -600,6 +617,8 @@ Status MCP45HVX1::generalCallDecrementWiper() {
   Status st = _generalCallWrite(cmd::GC_DECREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
 }
@@ -743,6 +762,7 @@ Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
   value = rx[cmd::READ_LSB_INDEX];
   if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
     _syncRegister(_addressPointer, value);
+    _markRegisterReadbackVerified(_addressPointer);
   }
   return Status::Ok();
 }
@@ -805,6 +825,9 @@ Status MCP45HVX1::_sendWiperStepCommand(cmd::Command command, uint8_t steps) {
 
     Status st = _i2cWriteTracked(_config.i2cAddress, payload, chunk);
     if (!st.ok()) {
+      if (_isAmbiguousStateWriteFailure(st)) {
+        _markHardwareStateUncertain(st, true, false);
+      }
       return st;
     }
 
@@ -951,6 +974,65 @@ void MCP45HVX1::_clearCachedRegisters() {
   _cachedWiper = 0;
   _cachedTconKnown = false;
   _cachedTcon = cmd::TCON_DEFAULT;
+}
+
+bool MCP45HVX1::_isAmbiguousStateWriteFailure(const Status& st) {
+  if (st.ok() || st.inProgress()) {
+    return false;
+  }
+
+  switch (st.code) {
+    case Err::INVALID_CONFIG:
+    case Err::INVALID_PARAM:
+    case Err::NOT_INITIALIZED:
+    case Err::UNSUPPORTED:
+    case Err::BUSY:
+    case Err::DEVICE_NOT_FOUND:
+    case Err::REGISTER_MISMATCH:
+    case Err::I2C_NACK_ADDR:
+      return false;
+    default:
+      return true;
+  }
+}
+
+void MCP45HVX1::_markHardwareStateUncertain(const Status& st,
+                                            bool wiperAffected,
+                                            bool tconAffected) {
+  if (wiperAffected) {
+    _cachedWiperKnown = false;
+    _wiperReadbackRequiredForUncertainty = true;
+  }
+  if (tconAffected) {
+    _cachedTconKnown = false;
+    _tconReadbackRequiredForUncertainty = true;
+  }
+  if (wiperAffected || tconAffected) {
+    _hardwareStateUncertain = true;
+    _hardwareStateUncertainError = st;
+    _addressPointerKnown = false;
+  }
+}
+
+void MCP45HVX1::_markRegisterReadbackVerified(uint8_t reg) {
+  if (reg == cmd::REG_WIPER0) {
+    _wiperReadbackRequiredForUncertainty = false;
+  } else if (reg == cmd::REG_TCON0) {
+    _tconReadbackRequiredForUncertainty = false;
+  }
+
+  if (_hardwareStateUncertain &&
+      !_wiperReadbackRequiredForUncertainty &&
+      !_tconReadbackRequiredForUncertainty) {
+    _clearHardwareStateUncertainty();
+  }
+}
+
+void MCP45HVX1::_clearHardwareStateUncertainty() {
+  _hardwareStateUncertain = false;
+  _hardwareStateUncertainError = Status::Ok();
+  _wiperReadbackRequiredForUncertainty = false;
+  _tconReadbackRequiredForUncertainty = false;
 }
 
 // ===========================================================================
