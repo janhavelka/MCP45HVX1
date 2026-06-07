@@ -1,4 +1,5 @@
 .pio
+hil_logs/
 *.tar.gz
 *.tgz
 .vscode/.browse.c_cpp.db*

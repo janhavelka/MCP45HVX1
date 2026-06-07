@@ -433,6 +433,33 @@ optional ANSI color via `color on|off`, reports uncertainty/cache-known fields
 in `state`, `drv`/`health`, and `cfg`, and implements `selftest output` as an
 explicit output-changing, state-restoring test.
 
+## HIL Evidence Capture
+
+`tools/run_hil_mcp45hvx1.py` captures attachable hardware-in-loop evidence from
+the Arduino or ESP-IDF CLI over serial. The default sequence is safe/read-only:
+`version`, `color off`, `help`, `scan`, `addr`, optional address selection,
+`probe`, `cfg`, `state`, `drv`, `readwiper`, `readtcon`, `dump`,
+`selftest safe`, `stress 100`, final `state`, and final `drv`.
+
+```bash
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-output-change --operator-prompts
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-general-call --confirm-isolated-bus
+```
+
+Output-changing groups require explicit flags. `--include-output-change`
+captures Wiper/TCON baseline, writes bounded values, reads back, restores the
+baseline, and reports `FAIL_RESTORE_UNCERTAIN` if restore cannot be verified.
+`--include-shdn` and `--include-wlat` require `--operator-prompts` because
+physical pin behavior must be observed separately from register readback.
+`--include-general-call` requires `--confirm-isolated-bus` and records the
+errata/isolation warning in the evidence.
+
+Each run writes `hil_logs/mcp45hvx1_<timestamp>/` with `raw_serial.txt`,
+`commands.txt`, `summary.json`, `report.md`, and `operator_notes.md`.
+Hardware validation is not claimed unless the HIL runner was actually run and
+the resulting evidence bundle is attached to the release or validation record.
+
 ## Running Tests
 
 The repository `platformio.ini` pins ESP32 example builds to pioarduino
@@ -475,6 +502,7 @@ the repository for audit and documentation work.
 - <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
 - <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
+- <a href="docs/MCP45HVX1_HIL_TOOLING_REPORT.md">HIL Tooling Report</a>
 - <a href="docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md">Device Model And Errata Report</a>
 - <a href="docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md">Docs Release Metadata Report</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)

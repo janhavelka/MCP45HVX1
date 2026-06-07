@@ -35,6 +35,7 @@ production-ready or industry-grade.
 
 | Gate | Command/evidence |
 |---|---|
+| HIL runner syntax | `python -m py_compile tools/run_hil_mcp45hvx1.py` |
 | Core timing guard | `python tools/check_core_timing_guard.py` |
 | Arduino/CLI contract | `python tools/check_cli_contract.py` |
 | ESP-IDF example contract | `python tools/check_idf_example_contract.py` |
@@ -70,6 +71,7 @@ repository unless a release explicitly decides to ship them.
 |---|---|
 | API contract current | `docs/MCP45HVX1_API_CONTRACT.md` reviewed |
 | Hardware validation doc current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` reviewed |
+| HIL tooling report current | `docs/MCP45HVX1_HIL_TOOLING_REPORT.md` reviewed |
 | Release checklist current | this file reviewed |
 | Stale reports handled | historical reports have superseded/current-status notes |
 | README honesty | no unsupported production/industry/hardware-validation claims |
@@ -92,15 +94,21 @@ affected until proven otherwise.
 
 | Gate | Evidence |
 |---|---|
-| Safe read-only HIL | `begin`, `probe`, `read`, `state`, `drv`, `selftest safe`, and read-only `stress` logs |
+| HIL runner bundle | `hil_logs/mcp45hvx1_<timestamp>/` attached with `summary.json`, `report.md`, `raw_serial.txt`, `commands.txt`, and `operator_notes.md` |
+| HIL command line recorded | exact `tools/run_hil_mcp45hvx1.py` invocation in `summary.json` |
+| HIL verdict recorded | `summary.json` verdict reviewed |
+| Safe read-only HIL | safe default runner sequence passed with `PASS_SAFE_ONLY` or stronger verdict |
 | Address strap tests | A1/A0 matrix evidence for `0x3C..0x3F` or documented alternate behavior |
 | POR/BOR rail cycling | rail cycle logs, POR defaults, and `TBORD` margin |
 | I2C fault injection | address NACK, data NACK, timeout, bus error, unplug/replug, reset behavior |
-| Output-changing HIL | Wiper/TCON/inc/dec/raw/startup-write baseline, measurement, restore logs |
-| SHDN/WLAT checks | physical override and readback-vs-output evidence if pins are wired |
+| Output-changing HIL | `PASS_WITH_OUTPUT_CHANGE` or reviewed `OPERATOR_REVIEW_REQUIRED`, baseline, measurement, restore logs |
+| SHDN/WLAT checks | physical override and readback-vs-output observations in `operator_notes.md` if pins are wired |
 | Low-voltage analog evidence | P0A/P0W/P0B voltage/current measurements on safe load |
 | High-voltage evidence | required only if any high-voltage validation claim is made |
 | General Call isolated-bus evidence | ACK/readback/analog measurement on isolated bus |
+
+Safe-only HIL cannot support output-changing, analog-accuracy, high-voltage, or
+General Call safety claims.
 
 Use `docs/MCP45HVX1_HARDWARE_VALIDATION.md` for templates and detailed
 measurement requirements.
@@ -115,6 +123,9 @@ measurement requirements.
 | CI run | Pending |
 | Package artifact and size | Pending |
 | Hardware evidence bundle | Pending |
+| HIL verdict | Pending |
+| HIL evidence directory/report link | Pending |
+| Hardware HIL actually run | yes / no |
 | Remaining risk acceptances | Pending |
 | Reviewer | Pending |
 | Date | Pending |

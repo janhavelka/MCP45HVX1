@@ -28,6 +28,15 @@ Complete this header for each validation run:
 | WLAT wiring | tied / GPIO / external circuit |
 | Instruments | DMM, scope, logic analyzer, supply, load |
 | Safe load used | Pending |
+| HIL runner command line | Pending |
+| HIL runner script | `tools/run_hil_mcp45hvx1.py` |
+| Serial port and baud | Pending |
+| HIL output directory | Pending |
+| HIL `summary.json` verdict | Pending |
+| HIL `report.md` path | Pending |
+| Operator prompts enabled | yes / no |
+| HIL groups enabled | safe-only / output-change / SHDN / WLAT / General Call |
+| General Call isolation confirmation | Pending / not applicable |
 
 ## Safety Prerequisites
 
@@ -49,11 +58,15 @@ These checks must not intentionally change analog output:
 
 | Check | Expected evidence | Result |
 |---|---|---|
-| Default `begin()` | Logic trace shows Wiper/TCON reads only; no Wiper/TCON writes | Pending |
-| `probe()` | Raw Wiper read result and status; no health/cache mutation claim | Pending |
-| `read`, `state`, `drv`, `cfg` | CLI output includes address, variant, cache-known flags, uncertainty, and last status | Pending |
+| HIL safe runner | `python tools/run_hil_mcp45hvx1.py --port <port> --baud 115200 --address <addr>` | Pending |
+| `version`, `color off`, `help` | Firmware/library version and color-disabled transcript | Pending |
+| `scan`, `addr`, optional address selection | Bus scan and active address recorded | Pending |
+| `probe` | Raw Wiper read result and status; no health/cache mutation claim | Pending |
+| `cfg`, `state`, `drv` | Address, variant, cache-known flags, uncertainty, and last status visible | Pending |
+| `readwiper`, `readtcon`, `dump` | Volatile Wiper/TCON and raw pointer readback captured | Pending |
 | `selftest safe` | Read-only or state-restoring behavior documented by log | Pending |
-| `stress [N]` | Read-only stress summary with no output-changing frames | Pending |
+| `stress 100` | Read-only stress summary with no output-changing frames | Pending |
+| Final `state`, final `drv` | Final online/uncertainty/dirty state recorded | Pending |
 
 ## Address Strap Matrix
 
@@ -99,13 +112,16 @@ evidence is accepted:
 
 | Command/API | Evidence required | Result |
 |---|---|---|
+| `--include-output-change` | Baseline Wiper/TCON, command log, readback, measurements, restore | Pending |
+| `--include-wiper-ramp` | Bounded ramp values, measurements for each point, restore | Pending |
 | Wiper write / percent / fraction | Baseline, command log, readback, analog measurement, restore | Pending |
 | INC/DEC | Baseline, step count, readback, analog measurement, restore | Pending |
+| `--include-tcon-toggle` | TCON terminal mode toggle, readback, terminal measurement, restore | Pending |
 | TCON write / terminal mode | Baseline, command log, readback, terminal measurement, restore | Pending |
 | TCON software shutdown | Distinguish TCON software shutdown from hardware SHDN pin | Pending |
 | Raw Wiper/TCON write | Explicit operator gate, readback, analog measurement, restore | Pending |
 | Optional startup writes | `begin()` evidence showing readback first, write only when enabled, recoverable failure path | Pending |
-| Restore failure | CLI/API uncertainty and original error recorded | Pending |
+| Restore failure | Runner verdict is `FAIL_RESTORE_UNCERTAIN`; CLI/API uncertainty and original error recorded | Pending |
 
 ## Analog Measurement Checks
 
@@ -122,8 +138,13 @@ resistance, leakage, INL/DNL, temperature behavior, or board-level loading.
 
 ## SHDN And WLAT Checks
 
+These checks require explicit runner flags and operator prompts. Register
+readback must be recorded separately from physical output observations.
+
 | Check | Expected evidence | Result |
 |---|---|---|
+| `--include-shdn --operator-prompts` | SHDN wiring, asserted/released observations, readback logs | Pending |
+| `--include-wlat --operator-prompts` | WLAT wiring, hold/release observations, readback logs | Pending |
 | SHDN asserted low | Registers read back but physical terminals remain hardware-shutdown overridden | Pending |
 | SHDN released high | Physical output follows register/TCON state when external circuitry permits | Pending |
 | WLAT asserted | Wiper register changes but physical wiper output is held | Pending |
@@ -134,6 +155,10 @@ resistance, leakage, INL/DNL, temperature behavior, or board-level loading.
 
 Output-changing General Call commands require an isolated MCP45HVX1 bus unless
 a documented shared-bus risk acceptance is approved.
+
+The HIL runner must be invoked with `--include-general-call` and
+`--confirm-isolated-bus` before any General Call command is sent. The errata
+warning must appear in `raw_serial.txt`, `summary.json`, and `report.md`.
 
 | Command | ACK/NACK | Readback verified | Analog measured | Isolation/risk decision |
 |---|---|---|---|---|
@@ -167,13 +192,21 @@ Fixture and instruments:
 Rails and load:
 Command/API:
 Raw serial/log output:
+HIL output directory:
+summary.json verdict:
+report.md path:
+commands.txt path:
+operator_notes.md path:
 Logic analyzer capture:
 Measurements:
 Restore action:
 Final readback:
 Uncertainty state:
-Pass/fail:
+Verdict:
 Evidence links:
 Reviewer/signoff:
 Notes/risk acceptance:
 ```
+
+Allowed HIL verdicts are `PASS_SAFE_ONLY`, `PASS_WITH_OUTPUT_CHANGE`, `FAIL`,
+`FAIL_RESTORE_UNCERTAIN`, `OPERATOR_REVIEW_REQUIRED`, and `SKIPPED_UNSAFE`.
