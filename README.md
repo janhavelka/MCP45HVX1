@@ -420,7 +420,13 @@ Native ESP-IDF build of the bring-up CLI command contract. It uses
 buffers. The example explicitly supports the MCP45HVX1 last-address read format
 (`txLen == 0`) and General Call writes to address `0x00` using ESP-IDF defined
 I2C operations with manual address bytes. `tools/check_idf_example_contract.py`
-rejects Arduino compatibility facades and checks the native IDF command surface.
+rejects Arduino compatibility facades, placeholder command behavior, unsafe
+parse-to-byte casts, no-op color support, and selftest-output mismatches.
+
+The IDF CLI uses bounded command parsers before all byte-sized writes, has
+optional ANSI color via `color on|off`, reports uncertainty/cache-known fields
+in `state`, `drv`/`health`, and `cfg`, and implements `selftest output` as an
+explicit output-changing, state-restoring test.
 
 ## Running Tests
 
@@ -440,6 +446,7 @@ python scripts/generate_version.py check
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
 cd examples/espidf_basic
+idf.py set-target esp32s3
 idf.py build
 ```
 

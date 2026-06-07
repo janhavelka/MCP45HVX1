@@ -82,9 +82,9 @@ MANDATORY_COMMANDS = [
 GENERAL_CALL_SUBCOMMANDS = ["arm", "disarm", "wiper", "tcon", "inc", "dec"]
 GENERAL_CALL_IDF_TOKENS = [
     "addr == 0x00U",
-    "transmitWithManualAddress",
+    "transmitGeneralCall",
     "I2C_DEVICE_ADDRESS_NOT_USED",
-    "addressByte = static_cast<uint8_t>(addr << 1)",
+    "addressByte = 0x00U",
     "i2c_master_execute_defined_operations",
 ]
 

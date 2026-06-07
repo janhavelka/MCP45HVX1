@@ -40,8 +40,8 @@ read only for CLI patterns.
   health view.
 - Core timing used an Arduino `millis()` fallback even though `Config::nowMs`
   existed.
-- There is no ESP-IDF example in this repository, so Arduino/IDF parity is
-  documented as a remaining gap rather than claimed.
+- A native ESP-IDF example has since been added under `examples/espidf_basic`;
+  current parity is enforced by `tools/check_idf_example_contract.py`.
 
 ## Implemented CLI Improvements
 
@@ -100,7 +100,7 @@ That executed and passed:
 
 ```text
 python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py   # skipped: no ESP-IDF example present
+python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_generated_artifacts.py
 python scripts/generate_version.py check
@@ -118,11 +118,11 @@ completed successfully.
 
 ## Remaining Gaps
 
-- No native ESP-IDF MCP45HVX1 example exists yet. The new IDF contract script
-  enforces rules if an IDF example is added, but currently reports a skip.
+- Native ESP-IDF behavior now has a contract guard, but it still needs logged
+  hardware-console evidence before any hardware-validation claim.
 - No automated HIL/serial evidence runner was found in the sibling repositories
   or this repo.
 - CLI output is statically guarded and build-tested, but there are no golden
-  serial-output unit tests because the current native Serial stub discards text.
+  serial-output unit tests for complete transcript comparison.
 - `raw write`/`wreg` remain explicit command-gated rather than interactive
   confirmation-gated so automated HIL remains possible.
