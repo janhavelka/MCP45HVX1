@@ -1,6 +1,6 @@
 # MCP45HVX1 Driver Library
 
-Production-grade MCP45HVX1 high-voltage I2C digital potentiometer driver for
+Framework-neutral MCP45HVX1 high-voltage I2C digital potentiometer driver for
 ESP32 (Arduino/PlatformIO and ESP-IDF).
 
 ## Features
@@ -9,7 +9,7 @@ ESP32 (Arduino/PlatformIO and ESP-IDF).
 - **Health monitoring** - READY/DEGRADED/OFFLINE state tracking
 - **Volatile register API** - Wiper 0 and TCON0 read/write helpers
 - **Wiper commands** - direct write plus documented INC/DEC commands
-- **Terminal control** - potentiometer, rheostat, floating wiper, and software shutdown presets
+- **Terminal control** - potentiometer, rheostat, floating wiper, and TCON software shutdown presets
 - **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames, with explicit `GCEN` caveats
 - **Bus-interface reset hook** - optional board callback for the documented software-reset/bus-release sequence
 - **Variant helpers** - 7-bit/8-bit code limits, terminal-current limits, nominal resistance, and position conversion helpers
@@ -128,9 +128,15 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `uint8_t codeFromFraction(float fraction, Resolution resolution)`
 - `float fractionFromCode(uint8_t code, Resolution resolution)`
 - `Status readWiperFraction(float& fraction)`
-- `Status writeWiperFraction(float fraction)`
+- `Status writeWiperFraction(float fraction)` - rejects values outside `0.0..1.0`
 - `stepResistanceOhms()`, `resistanceBToWOhms()`, `resistanceAToWOhms()` - ideal helper math only
 - `maxTerminalCurrentMilliAmps()` - datasheet terminal-current limit by RAB option
+
+`codeFromFraction()` clamps helper input to the configured resolution and
+`fractionFromCode()` clamps raw codes before converting to a normalized value.
+`writeWiperFraction()` is output-changing and rejects values outside the
+inclusive `0.0..1.0` range with `Err::INVALID_PARAM`; it sends no I2C write for
+out-of-range values.
 
 ### Terminal Control
 
@@ -168,6 +174,13 @@ General Call ACKs are broadcast and not device-specific, successful General Call
 helpers mark the affected local cache entry unknown; call `readSnapshot()` to
 verify local state afterward.
 
+Production firmware must treat General Call as a release-gated feature. Review
+`DS80000649B` and any newer errata against the actual package marking/date code
+before release. Output-changing General Call commands require isolated-bus
+evidence, or a documented risk acceptance for affected or unknown silicon.
+Shared-bus deployments must not claim General Call safety without logged
+evidence and signoff.
+
 ## Uncertain Hardware State
 
 MCP45HVX1 Wiper and TCON writes can change real analog and high-voltage
@@ -184,6 +197,11 @@ were accepted before the host observed failure, so they set uncertainty for the
 affected Wiper or TCON state. `resetI2cState()` does not clear uncertainty; use
 `readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` to perform real
 readback/resync.
+
+`codeFromFraction()` is a pure conversion helper and clamps out-of-range input
+to the nearest endpoint. `writeWiperFraction()` is output-changing and rejects
+out-of-range or NaN input with `Err::INVALID_PARAM` instead of clamping, so
+caller mistakes do not silently drive high-voltage analog output to an endpoint.
 
 `begin()` uses the same uncertainty model for optional startup writes. Baseline
 Wiper/TCON reads must succeed before any configured startup write is attempted.
@@ -212,7 +230,7 @@ returned with their original public status code.
 | `initialWiperCode` | `0x7F` | Wiper value used when startup Wiper write is enabled |
 | `writeInitialTcon` | `false` | Explicit output-changing TCON write during `begin()` |
 | `initialTcon` | `0xFF` | TCON value used when startup TCON write is enabled |
-| `requirePowerOnDefaults` | `false` | Require POR/BOR Wiper and TCON defaults during `begin()` |
+| `requirePowerOnDefaults` | `false` | Require Wiper/TCON readback to equal POR/BOR defaults during `begin()` |
 | `requireReadMsbZero` | `true` | Enforce documented read MSB byte `0x00` |
 | `offlineThreshold` | `5` | Consecutive tracked failures before OFFLINE |
 
@@ -260,15 +278,33 @@ physical output after a write failure.
 
 - The implemented registers are `0x00` Wiper 0 and `0x04` TCON0. All other
   addresses are treated as reserved.
+- MCP45HV31 is the 7-bit/128-tap variant with full-scale code `0x7F` and
+  POR/BOR Wiper default `0x3F`. MCP45HV51 is the 8-bit/256-tap variant with
+  full-scale code `0xFF` and POR/BOR Wiper default `0x7F`.
 - Reads return two bytes on the bus. The driver checks that the first byte is
   `0x00` and returns the second byte as the register value.
-- `WLAT` affects the physical wiper update, not I2C command acceptance.
-- `SHDN` overrides terminal connectivity but does not corrupt registers.
+- TCON0 is register `0x04`; reserved bits `[7:4]` are forced high on writes and
+  expected high on readback. TCON POR/BOR default is `0xFF`.
+- `WLAT` is a hardware pin. When high, it can hold physical wiper movement even
+  though Wiper register writes are accepted and read back.
+- `SHDN` is an external active-low hardware pin. It overrides terminal
+  connectivity but does not corrupt Wiper/TCON registers. Core APIs named
+  `shutdown` control TCON software shutdown via R0HW, not the SHDN pin.
+- Register readback proves volatile Wiper/TCON contents only. It does not prove
+  physical analog movement when WLAT is high, SHDN is asserted, or external
+  circuitry overrides the output.
 - `begin()` does not write the analog state by default. Enable the initial-write
   flags only when that startup behavior is intentional.
 - Optional startup writes are two-phase: read Wiper/TCON first, then write TCON
   before Wiper if enabled. A failed optional write can leave the driver
   initialized but degraded/uncertain so the application can read back or recover.
+- DS20005304B specifies `TBORD`, delay after device exits reset state with
+  `VL > VBOR`, as 10 us typical and 20 us maximum. No separate `tPOR` ready
+  delay is identified in the local datasheet extract. The core does not own rail
+  sequencing, reset supervision, SHDN/WLAT pins, or startup delays; applications
+  must ensure digital and analog rails and pins are stable before `begin()`.
+  `Config::nowMs` is used for health timestamps, not for delay during
+  `begin()` or `recover()`.
 
 ## Address Note
 
@@ -279,11 +315,13 @@ DS20005304B Rev B Table 6-2 and the official PDF text give fixed address bits
 accepts `0x5C-0x5F` only when `Config::allowAlternateAddressRange` is explicitly
 enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
 
-Hardware validation should verify the populated A1/A0 address, the WLAT and SHDN
-board strap behavior, General Call enablement, and the analog terminal limits for
-the selected RAB option. Opt-in startup writes must be measured on a safe load
-before production use. The helper math is idealized and does not include
-tolerance, wiper resistance, leakage, INL/DNL, or board-level loading.
+Hardware validation must verify the populated A1/A0 address, silicon marking
+and errata applicability, WLAT and SHDN board strap behavior, General Call
+isolation or documented risk acceptance, and analog terminal limits for the
+selected RAB option. Opt-in startup writes and other output-changing tests must
+be measured on a safe load and restored before production use. The helper math
+is idealized and does not include tolerance, wiper resistance, leakage, INL/DNL,
+or board-level loading.
 
 ## Examples
 
@@ -412,6 +450,8 @@ idf.py build
 - <a href="docs/05_register_map.md">Register Map</a>
 - <a href="docs/register_reference.md">Driver Register Reference</a>
 - <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
+- <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
+- <a href="docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md">Device Model And Errata Report</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
 - <a href="docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md">CLI Parity And Color Report</a>

@@ -597,6 +597,18 @@ void printErrataInfo() {
                     cli::yesNoColor(info.uniqueBusWorkaroundForAffectedSilicon),
                     log_bool_str(info.uniqueBusWorkaroundForAffectedSilicon),
                     LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Production release gate required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.productionReleaseGateRequired ? 1U : 0U),
+                    log_bool_str(info.productionReleaseGateRequired),
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Shared-bus risk acceptance required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.sharedBusRiskAcceptanceRequired ? 1U : 0U),
+                    log_bool_str(info.sharedBusRiskAcceptanceRequired),
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  General Call isolated-bus evidence required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.generalCallRequiresIsolatedBusEvidence ? 1U : 0U),
+                    log_bool_str(info.generalCallRequiresIsolatedBusEvidence),
+                    LOG_COLOR_RESET);
   LOG_SERIAL.println("  Source: docs/MCP45HVX1_Errata_DS80000649B.pdf");
 }
 
@@ -889,7 +901,7 @@ void printHelp() {
   cli::printHelpItem("inc [n] / dec [n]", "Step wiper with clamp at endpoints");
   cli::printHelpItem("tcon [value|default]", "Read or write raw TCON byte");
   cli::printHelpItem("term / terminal a|w|b [on|off]", "Read or set one terminal bit");
-  cli::printHelpItem("shutdown [on|off]", "Read or set software shutdown");
+  cli::printHelpItem("shutdown [on|off]", "Read or set TCON software shutdown, not SHDN pin");
   cli::printHelpItem("software-shutdown [on|off]", "Alias for shutdown");
   cli::printHelpItem("mode [pot|bw|aw|float|shutdown]", "Read or apply terminal preset");
   cli::printHelpItem("defaults", "Restore volatile POR/BOR defaults");
@@ -1209,7 +1221,7 @@ void handleShutdown(const char* args) {
     LOGE("usage: shutdown [0|1]");
     return;
   }
-  warnOutputChanging("shutdown");
+  warnOutputChanging("TCON software shutdown");
   const MCP45HVX1::Status st = gDev.setSoftwareShutdown(enabled);
   printStatus(st);
   if (st.ok()) {

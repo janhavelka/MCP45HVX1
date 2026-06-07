@@ -87,7 +87,10 @@ The Volatile TCON0 register (address 04h, reset = FFh) provides software control
 
 [Source: DS20005304B, p. 36]
 
-**R0HW = 0** produces the same physical result as the SHDN hardware pin asserted Low — but via software. This allows shutdown control entirely through I²C without using the SHDN pin. [Source: DS20005304B, p. 47]
+**R0HW = 0** produces the same terminal state as the SHDN hardware pin asserted Low, but through the TCON register. This allows software shutdown through I2C without controlling the external SHDN pin. [Source: DS20005304B, p. 47]
+
+Driver APIs named `shutdown` operate on this TCON/R0HW software shutdown bit.
+They do not control or report the external active-low SHDN pin.
 
 **Individual terminal disconnect:** R0A, R0W, and R0B can be cleared independently, allowing:
 - Rheostat (B to W) configuration: Clear R0A (disconnect A), keep R0W and R0B = 1
@@ -109,6 +112,10 @@ The Volatile TCON0 register (address 04h, reset = FFh) provides software control
 
 SHDN pin **overrides** TCON register bits when asserted. When SHDN is released, TCON bits control the state. TCON register is **not modified** by SHDN activity. [Source: DS20005304B, p. 47]
 
+The core driver does not own SHDN. TCON readback can verify register contents,
+but it does not prove physical terminal connectivity while SHDN or external
+circuitry overrides the output.
+
 ---
 
 ## 5. Terminal Connectivity States
@@ -119,7 +126,7 @@ The following states are defined by the datasheet for various TCON and SHDN comb
 
 All three terminals P0A, P0W, P0B connected. Resistor ladder functions as a full potentiometer. [Source: DS20005304B, p. 36]
 
-### Shutdown state (SHDN = Low or R0HW = 0)
+### Shutdown state (external SHDN = Low or TCON R0HW = 0)
 
 - P0A: Disconnected from resistor network.
 - P0W: Internally shorted to P0B.
@@ -147,6 +154,10 @@ This state is described in the application note Section 8.1 as useful for "disco
 - **WLAT = Low:** Wiper position updates normally after each valid Write/INC/DEC command.
 - **WLAT = High:** Wiper position is held (latched) at its current value. New commands may be sent and will be Acknowledged, but the physical wiper position does not change.
 - When WLAT returns to Low: The wiper moves to the value most recently written (or incremented/decremented) while WLAT was High.
+
+The core driver does not own WLAT. Wiper readback can verify the volatile Wiper
+register value, but it does not prove the physical analog output moved while
+WLAT is active.
 
 [Source: DS20005304B, p. 27, p. 50]
 
@@ -243,7 +254,7 @@ Triggered when VL rises above the POR threshold. Device initializes to:
 
 Triggered when VL drops below the BOR threshold. Same reset behavior as POR: registers return to default values. [Source: DS20005304B, p. 28]
 
-> **Note:** No explicit POR/BOR threshold voltage is stated in the extracted pages for VL. The device operates at VL = 1.8–5.5 V; POR/BOR threshold levels are not explicitly enumerated in the available text. See `08_variant_differences_and_open_questions.md`.
+> **Note:** `03_electrical_and_timing.md` records the maintained POR/BOR timing-table values: VDPOR max 1.8 V to ensure Wiper reset, VAPOR max 6.0 V, POR/BOR not rate-dependent, and `TBORD` = 10 us typical / 20 us maximum after reset exit. A separate host-facing ready delay named `tPOR` is not identified in the local datasheet extract.
 
 ### V+ / V− supply
 

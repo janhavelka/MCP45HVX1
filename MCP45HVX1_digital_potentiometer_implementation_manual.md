@@ -33,13 +33,27 @@ volatile register-cache knowledge, and non-owning callback contexts.
 random-read command format, and caches the values. It does not write the analog
 state by default.
 
+The datasheet timing table gives `TBORD`, the delay after the device exits reset
+state with `VL > VBOR`, as 10 us typical and 20 us maximum. A separate `tPOR`
+ready delay is not identified in the local datasheet extract. The core driver
+does not own rail sequencing, reset supervision, SHDN/WLAT pins, or startup
+delays. Applications must ensure digital and analog rails, reset, SHDN, and
+WLAT are stable before `begin()`. `Config::nowMs` is used for health timestamps,
+not for delay during `begin()` or `recover()`.
+
 Optional startup writes are available:
 
 - `Config::writeInitialWiper`
 - `Config::writeInitialTcon`
 
 Use these only when changing the wiper/terminal state during MCU startup is
-intentional for the hardware design.
+intentional for the hardware design. Validate them on a safe load with external
+measurement, record WLAT/SHDN state, and confirm that any restore path leaves
+`hardwareStateUncertain` clear before production use.
+
+`Config::requirePowerOnDefaults` compares immediate Wiper/TCON readback against
+documented POR/BOR default values. It does not prove that a fresh POR/BOR event
+occurred or that WLAT/SHDN/external circuitry allowed analog movement.
 
 `restorePowerOnDefaults()` explicitly writes the documented volatile defaults:
 TCON0 `0xFF` and Wiper 0 `0x7F` for 8-bit parts or `0x3F` for 7-bit parts.
@@ -76,16 +90,19 @@ INC/DEC frames. The driver cache clamps at full-scale and zero-scale after
 successful commands.
 
 `readWiperFraction()` and `writeWiperFraction()` provide normalized `0.0-1.0`
-position helpers. `stepResistanceOhms()`, `resistanceBToWOhms()`, and
-`resistanceAToWOhms()` are ideal nominal helpers from the configured ordering
-option. They do not include analog tolerance terms.
+position helpers. `codeFromFraction()` clamps because it is a pure conversion
+helper. `writeWiperFraction()` rejects out-of-range and NaN input with
+`INVALID_PARAM` because it changes high-voltage analog output.
+`stepResistanceOhms()`, `resistanceBToWOhms()`, and `resistanceAToWOhms()` are
+ideal nominal helpers from the configured ordering option. They do not include
+analog tolerance terms.
 
 ## TCON Handling
 
 TCON reserved bits `[7:4]` are forced high on all driver writes. Public helpers
 operate on the documented lower bits:
 
-- `R0HW`: software shutdown when cleared
+- `R0HW`: TCON software shutdown when cleared
 - `R0A`: P0A terminal connection
 - `R0W`: P0W terminal connection
 - `R0B`: P0B terminal connection
@@ -94,6 +111,14 @@ operate on the documented lower bits:
 state for CLI and diagnostics. TCON combinations that are valid but do not match
 a named preset decode as `TerminalMode::Custom`; `Custom` is not accepted by
 `setTerminalMode()`.
+
+The external SHDN pin is active-low hardware shutdown and is not controlled by
+the core unless an application adapter owns that pin. APIs named shutdown in
+this library control TCON software shutdown via R0HW. WLAT is also external to
+the core; when WLAT is high, Wiper register writes can be accepted and read back
+without moving the physical wiper until WLAT is released. Register readback
+therefore proves volatile register contents only, not analog terminal movement
+when WLAT, SHDN, or external circuitry overrides output.
 
 ## Health Tracking
 
@@ -144,6 +169,12 @@ local cache entry unknown because ACKs are broadcast and do not prove the local
 configured device executed the command. The CLI requires `gc arm` before each
 broadcast command attempt.
 
+DS80000649B is a production release gate. Affected silicon can accept traffic
+intended for other I2C devices and has General Call decode anomalies. Production
+firmware must either isolate the MCP45HVX1 on its own bus or record explicit
+risk acceptance for shared-bus deployment. Output-changing General Call use
+requires isolated-bus evidence.
+
 ## CLI Coverage
 
 The `01_basic_bringup_cli` example exposes practical chip features:
@@ -151,7 +182,7 @@ The `01_basic_bringup_cli` example exposes practical chip features:
 - device setup: `begin`, `addr`, `res`, `rab`, `scan`, `probe`, `recover`
 - register operations: `read`, `dump`, `rreg`, `wreg`, `last`
 - wiper operations: `wiper`, `frac`, `pos`, `zero`, `mid`, `max`, `inc`, `dec`
-- terminal operations: `tcon`, `term`, `shutdown`, `mode`
+- terminal operations: `tcon`, `term`, `shutdown`, `software-shutdown`, `mode`
 - diagnostics: `cfg`, `settings`, `drv`, `info`, `selftest`, `stress`,
   `stress_mix`, `iface_reset`
 - General Call frames: `gc arm`, `gc disarm`, `gc wiper`, `gc tcon`, `gc inc`,

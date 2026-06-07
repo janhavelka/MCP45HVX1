@@ -47,7 +47,7 @@ Notes:
 |---|---|---|
 | [7:0] | D[7:0] | Wiper tap code. Valid range: 00h–FFh (8-bit) or 00h–7Fh (7-bit). |
 
-**Note:** The full 8-bit data register width means bits [7:0] are all used for the 8-bit variant (MCP45HV51). For the 7-bit variant (MCP45HV31), only bits [6:0] are significant; bit 7 in the write data is accepted but the effective range is 00h–7Fh. The internal wiper tap clamps at the full-scale value. [Source: DS20005304B, p. 35, 63]
+**Note:** The full 8-bit data register width means bits [7:0] are all used for the 8-bit variant (MCP45HV51). For the 7-bit variant (MCP45HV31), only bits [6:0] are significant and the effective range is 00h-7Fh. The silicon clamps INC/DEC at full scale; the driver rejects direct 7-bit Wiper write values above 7Fh before I2C access to avoid silently changing a high-voltage output to a different value than requested. [Source: DS20005304B, p. 35, 63]
 
 ### Reset/default value
 
@@ -109,14 +109,14 @@ Custom POR/BOR wiper values are available via the Non-Standard Customer Authoriz
 |---|---|---|---|---|---|
 | — | Volatile TCON0 | 04h | 8 bits | R/W | FFh |
 
-**Purpose:** Controls whether each terminal (P0A, P0W, P0B) is connected to or disconnected from the resistor network. Also controls hardware shutdown mode (R0HW).
+**Purpose:** Controls whether each terminal (P0A, P0W, P0B) is connected to or disconnected from the resistor network. Also controls TCON software shutdown through R0HW.
 
 ### Bit field description
 
 | Bit | Field | Access | Reset | Description |
 |---|---|---|---|---|
 | [7:4] | Reserved | R | 1111 | Always read as `1111`. Must be written as `1111` (or all 1s) to avoid undefined behavior. The datasheet does not explicitly state "must be written as 1," but the reset is FFh and bits are shown as reserved. |
-| 3 | R0HW | R/W | 1 | **Hardware configuration bit.** 1 = Normal operation; 0 = Forces hardware shutdown state (P0A disconnected, P0W shorted to P0B). |
+| 3 | R0HW | R/W | 1 | **TCON software shutdown bit.** 1 = Normal operation; 0 = forces the same terminal state as hardware shutdown (P0A disconnected, P0W shorted to P0B). |
 | 2 | R0A | R/W | 1 | **Terminal A connection.** 1 = P0A connected to resistor network; 0 = P0A disconnected. |
 | 1 | R0W | R/W | 1 | **Wiper W connection.** 1 = P0W connected to resistor network; 0 = P0W disconnected (open). |
 | 0 | R0B | R/W | 1 | **Terminal B connection.** 1 = P0B connected to resistor network; 0 = P0B disconnected. |
@@ -131,7 +131,7 @@ Custom POR/BOR wiper values are available via the Non-Standard Customer Authoriz
 | 1 | 0 | 1 | 1 | P0A disconnected; W and B connected (rheostat B–W) |
 | 1 | 1 | 0 | 1 | P0W disconnected; A and B connected, wiper floating |
 | 1 | 1 | 1 | 0 | P0B disconnected; A and W connected (rheostat A–W) |
-| 0 | x | x | x | Hardware shutdown: P0A disconnected, P0W shorted to P0B |
+| 0 | x | x | x | TCON software shutdown: P0A disconnected, P0W shorted to P0B |
 
 [Source: DS20005304B, p. 36]
 
@@ -141,7 +141,7 @@ The SHDN hardware pin (active Low) **overrides** the TCON register bits when it 
 - SHDN Low: P0A disconnected, P0W shorted to P0B, regardless of TCON settings.
 - SHDN High: TCON bits control terminal connectivity.
 
-TCON register values are **not corrupted** when SHDN is asserted; the stored TCON values take effect when SHDN is released (SHDN goes High). [Source: DS20005304B, p. 47]
+TCON register values are **not corrupted** when SHDN is asserted; the stored TCON values take effect when SHDN is released (SHDN goes High). Driver APIs named shutdown operate on the R0HW software bit, not the external active-low SHDN pin. TCON readback proves register contents only; it does not prove physical terminal connectivity while SHDN or external circuitry overrides the output. [Source: DS20005304B, p. 47]
 
 ### INC/DEC inapplicability
 

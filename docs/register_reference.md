@@ -57,6 +57,12 @@ If a General Call helper returns an ambiguous transport failure after the bus
 transaction was attempted, the affected cache is also marked unknown and core
 hardware uncertainty is set until readback verifies the volatile state.
 
+General Call output-changing commands are production release gated. Review
+`DS80000649B` and newer errata against the actual package marking/date code.
+Use an isolated bus for affected or unknown silicon unless the release record
+contains explicit shared-bus risk acceptance. Shared-bus deployments must not
+claim General Call safety without logged evidence.
+
 ## TCON0
 
 | Bit | Mask | Name | Meaning when 1 | Meaning when 0 |

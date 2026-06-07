@@ -453,7 +453,8 @@ void printHelp() {
   puts("  defaults | wiper [0..max] | wiper percent <0..100> | wiper fraction <0.0..1.0>");
   puts("  frac [0.0..1.0] | pos [0.0..1.0] | zero | mid | max | inc [n] | dec [n]");
   puts("  tcon [value|default] | term a|w|b [on|off] | terminal a|w|b [on|off]");
-  puts("  shutdown [on|off] | software-shutdown [on|off] | mode [pot|bw|aw|float|shutdown]");
+  puts("  shutdown [on|off] | software-shutdown [on|off] (TCON, not SHDN pin)");
+  puts("  mode [pot|bw|aw|float|shutdown]");
   puts("Dangerous / operator-gated:");
   puts("  raw write <reg> <value> | wreg <reg> <value> | wregs <reg> <value>");
   puts("  gc arm | gc disarm | gc wiper <code> | gc tcon <value> | gc inc | gc dec");
@@ -562,6 +563,10 @@ void printErrata() {
          errata.sharedBusI2cHazard ? 1 : 0,
          errata.generalCallAddressDecodeHazard ? 1 : 0,
          errata.uniqueBusWorkaroundForAffectedSilicon ? 1 : 0);
+  printf("release_gate=%d shared_bus_risk_acceptance=%d gc_isolated_bus_evidence=%d\n",
+         errata.productionReleaseGateRequired ? 1 : 0,
+         errata.sharedBusRiskAcceptanceRequired ? 1 : 0,
+         errata.generalCallRequiresIsolatedBusEvidence ? 1 : 0);
   puts(errata.markingSummary);
 }
 
@@ -988,10 +993,13 @@ void handleCommand(char* line) {
                                                     "usage: wreg <reg> <value>"));
   } else if (strcmp(cmd, "frac") == 0 || strcmp(cmd, "pos") == 0) {
     float fraction = 0.0f;
-    if (parseFloatArg(args, &fraction)) {
+    if (*args != '\0' && parseFloatArg(args, &fraction) && fraction >= 0.0f &&
+        fraction <= 1.0f) {
       puts("WARNING: fraction write changes the analog output state.");
       printStatus(cmd, gDev.writeWiperFraction(fraction));
       readWiperCommand("readwiper");
+    } else if (*args != '\0') {
+      puts("Usage: frac [0.0..1.0]");
     } else {
       MCP45HVX1::Status st = gDev.readWiperFraction(fraction);
       printStatus(cmd, st);
@@ -1052,7 +1060,7 @@ void handleCommand(char* line) {
     uint32_t enabledInt = 0;
     if (parseBoolArg(args, &enabled) ||
         (parseU32(args, &enabledInt) && ((enabled = enabledInt != 0U), true))) {
-      puts("WARNING: shutdown command changes TCON terminal connectivity.");
+      puts("WARNING: software shutdown changes TCON terminal connectivity, not the SHDN pin.");
       printStatus(cmd, gDev.setSoftwareShutdown(enabled));
     } else {
       bool isShutdown = false;

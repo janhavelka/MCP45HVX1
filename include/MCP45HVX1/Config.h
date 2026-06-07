@@ -102,7 +102,7 @@ struct Config {
   uint8_t initialTcon = 0xFF;            ///< TCON value for explicit startup write
 
   // === Startup Checks ===
-  bool requirePowerOnDefaults = false;   ///< Require POR/BOR defaults during begin()
+  bool requirePowerOnDefaults = false;   ///< Require readback to equal POR/BOR defaults during begin()
   bool requireReadMsbZero = true;        ///< Require readback MSB byte to be 0x00
 
   // === Health Tracking ===

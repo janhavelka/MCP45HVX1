@@ -167,9 +167,9 @@ The MCP45HVX1 maintains **command byte compatibility** with the MCP44XX/MCP45XX/
 
 The following information was **not found** in the available pages of DS20005304B. Supplemental PDFs are now available as raw text extracts, but these items have not all been resolved into driver requirements.
 
-### 6.1 POR Completion Time (tPOR)
+### 6.1 POR/BOR Timing Names
 
-No tPOR (time from VL reaching POR threshold to device ready for I²C) is stated. The raw supplemental extracts should be searched before treating this as a final gap. [Source: Not found in DS20005304B]
+No separate `tPOR` parameter (time from VL reaching POR threshold to device ready for I2C) is stated. The electrical table records `TBORD`, delay after the device exits Reset state (`VL > VBOR`), as 10 us typical / 20 us maximum. Applications must satisfy this and board-level rail/reset stability before `begin()`; the core does not insert a delay. [Source: DS20005304B; `03_electrical_and_timing.md` Section 2.2]
 
 ### 6.2 GCEN Bit Location
 
@@ -197,7 +197,7 @@ Differences between standard (E-grade) and automotive variants are referenced in
 
 ### 6.8 Errata
 
-The errata is now available as `MCP45HVX1_Errata_DS80000649B.pdf` with raw text in `extracted-md/MCP45HVX1_Errata_DS80000649B.md`. It documents I2C-interface anomalies that can affect shared-bus behavior and General Call handling. This is no longer an access gap; implementation impact should be reviewed separately against the errata source PDF.
+The errata is available as `MCP45HVX1_Errata_DS80000649B.pdf` with raw text in `extracted-md/MCP45HVX1_Errata_DS80000649B.md`. It documents I2C-interface anomalies that can affect shared-bus behavior and General Call handling. This is a production release gate: review actual silicon marking/date code, require isolated-bus evidence for output-changing General Call on affected or unknown silicon, or record explicit shared-bus risk acceptance.
 
 ### 6.9 Startup Analog Rail Behavior During POR
 
@@ -283,7 +283,7 @@ The following supplemental PDFs are present in `docs/` and now have raw text ext
 
 | File | Extract | Content | Potential Impact on Implementation |
 |---|---|---|---|
-| `MCP45HVX1_Errata_DS80000649B.pdf` | `MCP45HVX1_Errata_DS80000649B.md` | Device errata | **Critical** — I2C-interface anomalies require implementation review |
+| `MCP45HVX1_Errata_DS80000649B.pdf` | `MCP45HVX1_Errata_DS80000649B.md` | Device errata | **Critical release gate** — I2C-interface anomalies require silicon marking review, isolated-bus evidence, or documented risk acceptance |
 | `Microchip_AN691_Optimizing_Digital_Potentiometer_Circuits.pdf` | `Microchip_AN691_Optimizing_Digital_Potentiometer_Circuits.md` | Precision optimization AN | May specify resistor compensation techniques |
 | `Microchip_AN692_Precision_Single_Supply_Photo_Detection.pdf` | `Microchip_AN692_Precision_Single_Supply_Photo_Detection.md` | Photo-detection precision AN | Application guidance; likely not core-driver normative |
 | `Microchip_AN1080_Digital_Potentiometer_Resistor_Variations.pdf` | `Microchip_AN1080_Digital_Potentiometer_Resistor_Variations.md` | Digital pot resistor variations | May detail RZS, RFS, and RS characterization |
@@ -308,11 +308,11 @@ The following are items that a driver/library implementation would typically nee
 | Item | Status | Notes |
 |---|---|---|
 | **I²C device address** | **CONFLICT** | TABLE 6-2 says 0x3C–0x3F; Figures 7-2–7-8 say 0x5C–0x5F — must verify on hardware |
-| POR/BOR threshold for VL | **Documented (typical only)** | VPOR = 1.8 V typ, VDBOR = 1.55 V typ — in file 03 Section 2.2; no Min/Max given |
-| POR completion time (tPOR) | **Missing** | Device ready time after power-up unknown |
+| POR/BOR threshold/timing for VL | **Documented in timing table** | VDPOR max 1.8 V to ensure Wiper reset, VAPOR max 6.0 V, POR/BOR not rate-dependent, and `TBORD` after Reset exit is 10 us typ / 20 us max. Do not use an uncited 1.55 V typical BOR value. |
+| POR/BOR delay naming | **Partially specified** | No separate `tPOR`; `TBORD` after Reset exit is 10 us typ / 20 us max |
 | SCL/SDA pull-up recommendations | **Missing** | No specific values given |
 | GCEN bit register location | **Unclear** | Referenced but not located in register map |
-| Errata content | **Extracted** | Review `MCP45HVX1_Errata_DS80000649B.pdf` before changing I2C/shared-bus behavior |
+| Errata content | **Release gate** | Review `MCP45HVX1_Errata_DS80000649B.pdf` and actual silicon marking before production; General Call/shared-bus safety requires evidence or risk acceptance |
 | Behavior at V+ = V− (single supply, no analog span) | **Unspecified** | Not described |
 | Maximum allowed SCL frequency in Standard/Fast mode | **Partial** | Timing tables in file 03 give tHD:STA, tSU:STA, etc. but max SCL implicitly 400 kHz (Fast) and 1.7 MHz (HS) |
 | D8 bit function | **Unclear** | Stated as "defined" but not described |

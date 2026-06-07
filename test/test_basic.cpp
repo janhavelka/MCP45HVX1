@@ -3,6 +3,7 @@
 
 #include <unity.h>
 
+#include <limits>
 #include <type_traits>
 
 #include "Arduino.h"
@@ -535,6 +536,47 @@ void test_silicon_errata_info() {
   TEST_ASSERT_TRUE(info.generalCallAddressDecodeHazard);
   TEST_ASSERT_TRUE(info.hardwareGeneralCallBitIgnored);
   TEST_ASSERT_TRUE(info.uniqueBusWorkaroundForAffectedSilicon);
+  TEST_ASSERT_TRUE(info.productionReleaseGateRequired);
+  TEST_ASSERT_TRUE(info.sharedBusRiskAcceptanceRequired);
+  TEST_ASSERT_TRUE(info.generalCallRequiresIsolatedBusEvidence);
+  TEST_ASSERT_TRUE(info.markingSummary != nullptr && info.markingSummary[0] != '\0');
+}
+
+void test_device_model_defaults_for_variants_and_registers() {
+  TEST_ASSERT_EQUAL_HEX8(0x00, cmd::REG_WIPER0);
+  TEST_ASSERT_EQUAL_HEX8(0x04, cmd::REG_TCON0);
+  TEST_ASSERT_EQUAL_HEX8(0x3C, cmd::MIN_ADDRESS);
+  TEST_ASSERT_EQUAL_HEX8(0x3F, cmd::MAX_ADDRESS);
+  TEST_ASSERT_EQUAL_HEX8(0x5C, cmd::ALT_MIN_ADDRESS);
+  TEST_ASSERT_EQUAL_HEX8(0x5F, cmd::ALT_MAX_ADDRESS);
+
+  TEST_ASSERT_EQUAL_HEX8(0x7F, Driver::maxWiperCode(Resolution::Bits7));
+  TEST_ASSERT_EQUAL_HEX8(0xFF, Driver::maxWiperCode(Resolution::Bits8));
+  TEST_ASSERT_EQUAL_HEX8(0x3F, Driver::defaultWiperCode(Resolution::Bits7));
+  TEST_ASSERT_EQUAL_HEX8(0x7F, Driver::defaultWiperCode(Resolution::Bits8));
+  TEST_ASSERT_EQUAL_HEX8(0xFF, cmd::TCON_DEFAULT);
+  TEST_ASSERT_EQUAL_HEX8(0xF0, cmd::TCON_RESERVED_MASK);
+  TEST_ASSERT_EQUAL_HEX8(0x0F, cmd::TCON_IMPLEMENTED_MASK);
+
+  FakeBus bus7;
+  bus7.resolution = Resolution::Bits7;
+  bus7.wiper = cmd::WIPER_DEFAULT_7BIT;
+  Driver dev7;
+  TEST_ASSERT_TRUE(dev7.begin(makeConfig(bus7)).ok());
+  DeviceInfo info7 = dev7.getDeviceInfo();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Resolution::Bits7),
+                          static_cast<uint8_t>(info7.resolution));
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_MAX_7BIT, info7.maxWiperCode);
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_7BIT, info7.defaultWiperCode);
+
+  FakeBus bus8;
+  Driver dev8;
+  TEST_ASSERT_TRUE(dev8.begin(makeConfig(bus8)).ok());
+  DeviceInfo info8 = dev8.getDeviceInfo();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Resolution::Bits8),
+                          static_cast<uint8_t>(info8.resolution));
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_MAX_8BIT, info8.maxWiperCode);
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_8BIT, info8.defaultWiperCode);
 }
 
 void test_begin_require_power_on_defaults() {
@@ -546,6 +588,33 @@ void test_begin_require_power_on_defaults() {
   Status st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
                           static_cast<uint8_t>(st.code));
+
+  FakeBus bus7;
+  bus7.resolution = Resolution::Bits7;
+  bus7.wiper = cmd::WIPER_DEFAULT_7BIT + 1u;
+  Driver dev7;
+  Config cfg7 = makeConfig(bus7);
+  cfg7.requirePowerOnDefaults = true;
+  st = dev7.begin(cfg7);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+
+  FakeBus tconBus;
+  tconBus.tcon = 0xF7;
+  Driver tconDev;
+  Config tconCfg = makeConfig(tconBus);
+  tconCfg.requirePowerOnDefaults = true;
+  st = tconDev.begin(tconCfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+
+  FakeBus ok7;
+  ok7.resolution = Resolution::Bits7;
+  ok7.wiper = cmd::WIPER_DEFAULT_7BIT;
+  Driver ok7Dev;
+  Config ok7Cfg = makeConfig(ok7);
+  ok7Cfg.requirePowerOnDefaults = true;
+  TEST_ASSERT_TRUE(ok7Dev.begin(ok7Cfg).ok());
 }
 
 void test_begin_optional_initial_writes() {
@@ -807,9 +876,24 @@ void test_tcon_write_sanitizes_reserved_bits() {
   Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, Driver::sanitizeTcon(cmd::TCON_DEFAULT));
+  TEST_ASSERT_EQUAL_HEX8(0xF7, Driver::sanitizeTcon(0x07));
+
   TEST_ASSERT_TRUE(dev.writeTcon(0x00).ok());
+  TEST_ASSERT_EQUAL_UINT8(1u, bus.writeLogCount);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_TCON0, cmd::Command::WriteData),
+                         bus.writeByte0Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xF0, bus.writeByte1Log[0]);
   TEST_ASSERT_EQUAL_HEX8(0xF0, bus.tcon);
   TEST_ASSERT_EQUAL_HEX8(0xF0, dev.getSettings().cachedTcon);
+
+  TerminalStatus decoded = Driver::decodeTcon(cmd::TCON_DEFAULT);
+  TEST_ASSERT_FALSE(decoded.softwareShutdown);
+  TEST_ASSERT_TRUE(decoded.terminalA);
+  TEST_ASSERT_TRUE(decoded.terminalW);
+  TEST_ASSERT_TRUE(decoded.terminalB);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TerminalMode::Potentiometer),
+                          static_cast<uint8_t>(decoded.mode));
 }
 
 void test_terminal_helpers() {
@@ -1430,8 +1514,12 @@ void test_failed_bus_reset_updates_health() {
 void test_conversions() {
   TEST_ASSERT_EQUAL_HEX8(0x80, Driver::codeFromFraction(0.5f, Resolution::Bits8));
   TEST_ASSERT_EQUAL_HEX8(0x40, Driver::codeFromFraction(0.5f, Resolution::Bits7));
+  TEST_ASSERT_EQUAL_HEX8(0x00, Driver::codeFromFraction(-0.1f, Resolution::Bits8));
+  TEST_ASSERT_EQUAL_HEX8(0xFF, Driver::codeFromFraction(1.1f, Resolution::Bits8));
+  TEST_ASSERT_EQUAL_HEX8(0x7F, Driver::codeFromFraction(1.1f, Resolution::Bits7));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0xFF, Resolution::Bits8));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0x7F, Resolution::Bits7));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0xFF, Resolution::Bits7));
 }
 
 void test_fraction_read_write_helpers() {
@@ -1446,8 +1534,27 @@ void test_fraction_read_write_helpers() {
   TEST_ASSERT_TRUE(dev.readWiperFraction(fraction).ok());
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.502f, fraction);
 
+  const uint32_t writesBeforeInvalid = bus.writeCalls;
   Status st = dev.writeWiperFraction(1.1f);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x80, bus.wiper);
+  TEST_ASSERT_EQUAL_UINT32(writesBeforeInvalid, bus.writeCalls);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+  TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
+
+  st = dev.writeWiperFraction(-0.1f);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x80, bus.wiper);
+  TEST_ASSERT_EQUAL_UINT32(writesBeforeInvalid, bus.writeCalls);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+  TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
+
+  st = dev.writeWiperFraction(std::numeric_limits<float>::quiet_NaN());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x80, bus.wiper);
+  TEST_ASSERT_EQUAL_UINT32(writesBeforeInvalid, bus.writeCalls);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+  TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
 }
 
 void test_operations_reject_before_begin() {
@@ -1526,6 +1633,7 @@ int main() {
   RUN_TEST(test_begin_without_initial_writes_is_read_only);
   RUN_TEST(test_device_info_and_resistance_helpers);
   RUN_TEST(test_silicon_errata_info);
+  RUN_TEST(test_device_model_defaults_for_variants_and_registers);
   RUN_TEST(test_begin_require_power_on_defaults);
   RUN_TEST(test_begin_optional_initial_writes);
   RUN_TEST(test_begin_initial_wiper_write_is_explicit_opt_in);

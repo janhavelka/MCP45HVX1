@@ -33,7 +33,7 @@ enum class TerminalMode : uint8_t {
   RheostatBToW,  ///< P0A disconnected; P0B and P0W connected
   RheostatAToW,  ///< P0B disconnected; P0A and P0W connected
   WiperFloating, ///< P0W disconnected; P0A and P0B connected
-  Shutdown,      ///< Software shutdown via R0HW=0
+  Shutdown,      ///< TCON software shutdown via R0HW=0, not the external SHDN pin.
   Custom         ///< Valid TCON state that does not match a named preset
 };
 
@@ -45,10 +45,10 @@ struct RegisterSnapshot {
 
 /// Decoded terminal-control register fields.
 struct TerminalStatus {
-  bool softwareShutdown = false; ///< true when R0HW=0
-  bool terminalA = false;        ///< P0A connection bit
-  bool terminalW = false;        ///< P0W connection bit
-  bool terminalB = false;        ///< P0B connection bit
+  bool softwareShutdown = false; ///< true when TCON R0HW=0; does not report SHDN pin
+  bool terminalA = false;        ///< Decoded TCON P0A connection bit; SHDN can override
+  bool terminalW = false;        ///< Decoded TCON P0W connection bit; SHDN can override
+  bool terminalB = false;        ///< Decoded TCON P0B connection bit; SHDN can override
   TerminalMode mode = TerminalMode::Potentiometer; ///< Best-fit decoded mode
 };
 
@@ -66,6 +66,8 @@ struct DeviceInfo {
 };
 
 /// Static summary of the published silicon errata that affects bus planning.
+/// This is release-gate input for documentation/CLI diagnostics, not proof that
+/// a specific board or silicon lot is safe for shared-bus or General Call use.
 struct SiliconErrataInfo {
   const char* documentNumber = "DS80000649B"; ///< Microchip errata document number.
   const char* documentRevision = "B (July 2015)"; ///< Errata revision used by this driver.
@@ -76,6 +78,9 @@ struct SiliconErrataInfo {
   bool generalCallAddressDecodeHazard = true; ///< Invalid GC command address bits can alias.
   bool hardwareGeneralCallBitIgnored = true; ///< Hardware GC bit is not decoded as specified.
   bool uniqueBusWorkaroundForAffectedSilicon = true; ///< Errata workaround uses an isolated bus.
+  bool productionReleaseGateRequired = true; ///< Production release must review silicon errata.
+  bool sharedBusRiskAcceptanceRequired = true; ///< Shared-bus use needs isolated-bus proof or risk acceptance.
+  bool generalCallRequiresIsolatedBusEvidence = true; ///< Output-changing GC requires isolated-bus evidence.
 };
 
 /// Snapshot of the current driver settings and health state.
@@ -105,6 +110,9 @@ struct SettingsSnapshot {
 /// contexts, health counters, and volatile register cache state. Callback
 /// targets and user contexts must outlive every call that can use them. Public
 /// APIs are synchronous, not internally serialized, and not ISR-safe.
+/// The core does not own analog rails or hardware pins. SHDN is an external
+/// active-low pin and WLAT is an external wiper-latch pin unless an application
+/// adapter explicitly controls them.
 class MCP45HVX1 {
 public:
   MCP45HVX1() = default;
@@ -120,6 +128,8 @@ public:
   /// Initialize the driver with configuration.
   ///
   /// By default this only reads Wiper/TCON to verify presence and cache state.
+  /// It does not delay for POR/BOR; applications must ensure rails, reset, SHDN,
+  /// and WLAT are stable before calling begin().
   /// Output-changing startup writes are opt-in via Config::writeInitialWiper
   /// and Config::writeInitialTcon and run only after baseline reads succeed.
   /// If an optional startup write fails, the driver preserves config/transport
@@ -180,7 +190,8 @@ public:
   /// @return Current driver health state.
   DriverState state() const { return _driverState; }
 
-  /// @return true after a successful begin() and before end().
+  /// @return true after begin() establishes config/transport state and before end().
+  /// A failed optional startup write can still leave this true for diagnostics.
   bool isInitialized() const { return _initialized; }
 
   /// @return true when the driver is READY or DEGRADED.
@@ -279,8 +290,10 @@ public:
   Status readWiperFraction(float& fraction);
 
   /// Write volatile Wiper 0 from a normalized 0.0-1.0 position.
-  /// @param fraction Normalized target position; values outside range are clamped.
-  /// @return Status::Ok() after the resulting code is written.
+  /// Unlike codeFromFraction(), this output-changing API rejects values outside
+  /// 0.0-1.0 instead of clamping them.
+  /// @param fraction Normalized target position in the inclusive range 0.0-1.0.
+  /// @return Status::Ok() after the resulting code is written, or INVALID_PARAM for out of range.
   Status writeWiperFraction(float fraction);
 
   /// Maximum valid wiper code for a resolution.
@@ -347,6 +360,8 @@ public:
   Status readTcon(uint8_t& value);
 
   /// Write volatile TCON0. Reserved upper bits are forced to 1.
+  /// This changes TCON software terminal state only. The external SHDN pin can
+  /// override the physical terminal output without changing the register.
   /// @param value Requested TCON0 byte; reserved bits are sanitized before write.
   /// @return Status::Ok() after the sanitized value is written and cached. Ambiguous transport
   /// failures mark the TCON cache unknown and set hardwareStateUncertain().
@@ -364,13 +379,15 @@ public:
   /// @return Status::Ok() on a valid TCON0 read.
   Status getTerminalEnabled(Terminal terminal, bool& enabled);
 
-  /// Enable or disable software shutdown via R0HW.
-  /// @param enabled true to enter software shutdown, false to keep R0HW connected.
+  /// Enable or disable TCON software shutdown via R0HW.
+  /// This is not control of the external active-low SHDN hardware pin.
+  /// @param enabled true to enter TCON software shutdown, false to keep R0HW connected.
   /// @return Status::Ok() after TCON0 is updated.
   Status setSoftwareShutdown(bool enabled);
 
-  /// Read software shutdown bit state from TCON0.
-  /// @param enabled Receives true when software shutdown is active.
+  /// Read TCON software shutdown bit state from TCON0.
+  /// This does not report the physical SHDN pin level.
+  /// @param enabled Receives true when TCON software shutdown is active.
   /// @return Status::Ok() on a valid TCON0 read.
   Status getSoftwareShutdown(bool& enabled);
 
@@ -390,6 +407,8 @@ public:
   Status readTerminalStatus(TerminalStatus& status);
 
   /// Read both implemented registers in sequence.
+  /// Register readback proves volatile register contents only. It does not prove
+  /// physical analog movement when WLAT, SHDN, or external circuitry overrides output.
   /// @param snapshot Receives Wiper 0 and TCON0 values.
   /// @return Status::Ok() only if both reads succeed.
   Status readSnapshot(RegisterSnapshot& snapshot);

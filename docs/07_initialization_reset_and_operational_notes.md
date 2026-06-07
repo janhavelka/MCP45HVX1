@@ -53,7 +53,7 @@ BOR occurs when VL drops below the BOR threshold. BOR causes the same register i
 
 [Source: DS20005304B, p. 28, p. 35–36]
 
-> **Note:** The exact POR and BOR threshold voltages for VL are specified in `03_electrical_and_timing.md`, Section 2.2: VPOR (VL POR rising threshold) = 1.8 V typ, VDBOR (VL BOR threshold) = 1.55 V typ (all typical values; explicit Min/Max not stated). [Source: DS20005304B, p. 13]
+> **Note:** `03_electrical_and_timing.md` records the POR/BOR timing-table values used by this repo: VDPOR max 1.8 V to ensure Wiper reset, VAPOR max 6.0 V, POR/BOR not rate-dependent, and `TBORD` = 10 us typical / 20 us maximum after reset exit. Do not use an uncited `1.55 V typ` BOR value. [Source: DS20005304B timing table]
 
 ---
 
@@ -65,8 +65,8 @@ TABLE 4-5 defines device behavior across distinct VL voltage regions. [Source: D
 
 | VL Condition | V+/V− State | Serial Interface | Pot Terminals | Wiper Register | Output |
 |---|---|---|---|---|---|
-| VL < VDBOR (< 1.8 V typ) | Valid | Ignored | Unknown | Unknown | Invalid |
-| VL < VDBOR (< 1.8 V typ) | Invalid | Ignored | Unknown | Unknown | Invalid |
+| VL < VDBOR | Valid | Ignored | Unknown | Unknown | Invalid |
+| VL < VDBOR | Invalid | Ignored | Unknown | Unknown | Invalid |
 | VDBOR ≤ VL < 1.8 V | Valid | Unknown | Connected | Initialized | Valid |
 | VDBOR ≤ VL < 1.8 V | Invalid | Unknown | Connected | Invalid | — |
 | 1.8 V ≤ VL ≤ 5.5 V | Valid | Accepted | Connected | Register controls | Valid |
@@ -99,9 +99,9 @@ No power-up sequencing order between V+ and V− is explicitly required in the d
 
 ### Wiper state during power-up
 
-The wiper position is undefined until POR completes. After POR, the wiper defaults to mid-scale. The I²C interface becomes active after POR. No explicit startup delay time (tPOR) is quantified in the extracted pages. [Source: DS20005304B, p. 28]
+The wiper position is undefined until POR completes. After POR, the wiper defaults to mid-scale. The timing table records `TBORD`, the delay after the device exits reset state (`VL > VBOR`), as 10 us typical and 20 us maximum. A separate host-facing startup delay named `tPOR` is not identified in the local datasheet extract. [Source: DS20005304B, p. 13, p. 28]
 
-> **Gap:** No explicit POR completion time (tPOR) is specified in the available pages. See `08_variant_differences_and_open_questions.md`.
+> **Driver contract:** The core driver does not own rail sequencing, reset supervision, SHDN/WLAT pins, or startup delays. Applications must ensure VL, V+/V-, reset, SHDN, and WLAT are stable and any board-level supervisor delay including `TBORD` has elapsed before calling `begin()`. `Config::nowMs` is used for health timestamps, not for delay during `begin()` or `recover()`.
 
 ---
 
@@ -169,7 +169,7 @@ After POR/BOR or after the software reset sequence:
 1. The Device Memory Address Pointer is set to **00h** (Volatile Wiper 0). [Source: DS20005304B, p. 61]
 2. A Read command using the "last address" format (without Repeated Start) will read Wiper 0 (address 00h).
 3. No initialization commands are required before the device is operational; it comes up in a fully functional state with mid-scale wiper and all terminals connected.
-4. The I²C interface is ready to accept commands immediately after POR.
+4. After the device exits reset, observe `TBORD` (10 us typical, 20 us maximum) before assuming the interface and volatile defaults are stable for host transactions.
 
 ---
 
@@ -181,6 +181,8 @@ If the WLAT synchronization feature is **not** used:
 If WLAT is used for synchronous wiper updates:
 - After power-up, ensure WLAT is Low before issuing wiper commands, unless intentional latching is desired.
 - During operation: update wipers with WLAT High, then release WLAT Low to apply all changes simultaneously.
+
+The core driver does not control WLAT. Register readback can confirm the volatile Wiper register value, but it does not prove the physical wiper output moved while WLAT is active or externally overridden.
 
 WLAT timing constraint (relative to SCL rising edge):
 
@@ -202,9 +204,11 @@ If hardware shutdown is **not** used:
 - SHDN must be tied High (connected to VL). [Source: DS20005304B, p. 25]
 
 If SHDN is used:
-- On power-up, if SHDN is Low, the device enters the shutdown state (P0A disconnected, P0W shorted to P0B) immediately after POR completes.
+- On power-up, if SHDN is Low, the device enters the shutdown state (P0A disconnected, P0W shorted to P0B) after reset exit and the required `TBORD` interval.
 - TCON0 registers retain their default (FFh) regardless of SHDN state.
 - To restore normal operation, release SHDN High.
+
+The core driver does not control the external active-low SHDN pin. APIs named software shutdown or terminal shutdown change TCON/R0HW state only; they do not drive SHDN or report its physical level. Register readback does not prove physical terminal connectivity while SHDN is asserted.
 
 [Source: DS20005304B, p. 47]
 
