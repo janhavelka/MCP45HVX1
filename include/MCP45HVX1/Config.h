@@ -92,10 +92,10 @@ struct Config {
   bool allowAlternateAddressRange = false; ///< Allow disputed 0x5C-0x5F range for hardware checks
 
   // === Optional Initialization Writes ===
-  bool writeInitialWiper = false;        ///< Write initialWiperCode during begin()
-  uint8_t initialWiperCode = 0x7F;       ///< Initial wiper code if writeInitialWiper is true
-  bool writeInitialTcon = false;         ///< Write initialTcon during begin()
-  uint8_t initialTcon = 0xFF;            ///< Initial TCON value if writeInitialTcon is true
+  bool writeInitialWiper = false;        ///< Output-changing Wiper write during begin() when true
+  uint8_t initialWiperCode = 0x7F;       ///< Wiper code for explicit startup write
+  bool writeInitialTcon = false;         ///< Output-changing TCON write during begin() when true
+  uint8_t initialTcon = 0xFF;            ///< TCON value for explicit startup write
 
   // === Startup Checks ===
   bool requirePowerOnDefaults = false;   ///< Require POR/BOR defaults during begin()

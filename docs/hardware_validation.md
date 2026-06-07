@@ -37,3 +37,20 @@ expected local state afterward:
 | `gc arm`, `gc tcon <value>` | Pending bench test | Pending bench test |
 | `gc arm`, `gc inc` | Pending bench test | Pending bench test |
 | `gc arm`, `gc dec` | Pending bench test | Pending bench test |
+
+## Startup Write Recoverability
+
+`begin()` must be read-only unless `Config::writeInitialWiper` or
+`Config::writeInitialTcon` is explicitly enabled. Validate this with a safe load
+or disconnected analog path before using startup writes on real circuits.
+
+| Check | Expected result | Observed |
+|---|---|---|
+| Default `begin()` with both startup writes disabled | Only Wiper/TCON read frames; no output-changing write frames | Pending bench test |
+| `writeInitialWiper=true` on safe load | Wiper changes to requested code and readback confirms value | Pending bench test |
+| `writeInitialTcon=true` on safe load | Terminal mode changes to requested TCON and readback confirms value | Pending bench test |
+| Induced failure during optional startup write | CLI/API reports uncertainty, original error is preserved, readback or `recover()` can inspect volatile state | Pending bench test |
+
+Software cannot validate terminal current, analog rail safety, SHDN/WLAT
+overrides, or external circuit response. Record external measurements before
+enabling output-changing startup writes in production firmware.

@@ -218,6 +218,7 @@ def main() -> int:
         "hardwareStateUncertainError",
         "cachedWiperKnown",
         "cachedTconKnown",
+        "output-changing startup write",
     ):
         require_token(text, token, "bringup CLI uncertainty output")
         require_token(idf_text, token, "ESP-IDF CLI uncertainty output")

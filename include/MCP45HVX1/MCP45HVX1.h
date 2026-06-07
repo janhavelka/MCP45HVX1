@@ -109,11 +109,14 @@ public:
   /// Initialize the driver with configuration.
   ///
   /// By default this only reads Wiper/TCON to verify presence and cache state.
-  /// Initial register writes are opt-in via Config::writeInitialWiper and
-  /// Config::writeInitialTcon.
+  /// Output-changing startup writes are opt-in via Config::writeInitialWiper
+  /// and Config::writeInitialTcon and run only after baseline reads succeed.
+  /// If an optional startup write fails, the driver preserves config/transport
+  /// state for readback/recover diagnostics and uses hardwareStateUncertain()
+  /// for ambiguous write failures.
   ///
   /// @param config Transport callbacks, device address, variant, and startup policy.
-  /// @return Status::Ok() when the device is present and the runtime cache is valid.
+  /// @return Status::Ok() when the baseline cache is valid and optional writes, if any, succeeded.
   Status begin(const Config& config);
 
   /// Process pending operations (currently a no-op).
@@ -131,7 +134,7 @@ public:
   /// @return Status::Ok() on ACK/read success, otherwise transport or presence error.
   Status probe();
 
-  /// Attempt to recover from DEGRADED/OFFLINE state by tracked register reads.
+  /// Attempt to recover from DEGRADED/OFFLINE or startup-write uncertainty by tracked register reads.
   /// @return Status::Ok() if Wiper/TCON were read and health returned online.
   Status recover();
 

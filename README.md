@@ -104,7 +104,7 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
 ### Lifecycle
 
-- `Status begin(const Config& config)` - validate config, read Wiper/TCON, optionally apply configured initial values
+- `Status begin(const Config& config)` - validate config, read Wiper/TCON first, then apply explicit output-changing startup writes if enabled
 - `void tick(uint32_t nowMs)` - no-op reserved hook
 - `void end()` - reset driver object state without changing device terminals
 
@@ -185,6 +185,13 @@ affected Wiper or TCON state. `resetI2cState()` does not clear uncertainty; use
 `readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` to perform real
 readback/resync.
 
+`begin()` uses the same uncertainty model for optional startup writes. Baseline
+Wiper/TCON reads must succeed before any configured startup write is attempted.
+If an optional startup write then fails, `begin()` returns the original error
+but preserves the runtime config and initialized transport state so
+`readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` can inspect the
+possibly changed volatile hardware state.
+
 ## Configuration
 
 | Field | Default | Description |
@@ -196,10 +203,10 @@ readback/resync.
 | `i2cTimeoutMs` | `50` | Transport timeout |
 | `busReset` | `nullptr` | Optional board callback for I2C bus/software reset |
 | `controlUser` | `nullptr` | Context pointer for `busReset` |
-| `writeInitialWiper` | `false` | Opt-in Wiper write during `begin()` |
-| `initialWiperCode` | `0x7F` | Wiper value used when opt-in write is enabled |
-| `writeInitialTcon` | `false` | Opt-in TCON write during `begin()` |
-| `initialTcon` | `0xFF` | TCON value used when opt-in write is enabled |
+| `writeInitialWiper` | `false` | Explicit output-changing Wiper write during `begin()` |
+| `initialWiperCode` | `0x7F` | Wiper value used when startup Wiper write is enabled |
+| `writeInitialTcon` | `false` | Explicit output-changing TCON write during `begin()` |
+| `initialTcon` | `0xFF` | TCON value used when startup TCON write is enabled |
 | `requirePowerOnDefaults` | `false` | Require POR/BOR Wiper and TCON defaults during `begin()` |
 | `requireReadMsbZero` | `true` | Enforce documented read MSB byte `0x00` |
 | `offlineThreshold` | `5` | Consecutive tracked failures before OFFLINE |
@@ -240,6 +247,9 @@ physical output after a write failure.
 - `SHDN` overrides terminal connectivity but does not corrupt registers.
 - `begin()` does not write the analog state by default. Enable the initial-write
   flags only when that startup behavior is intentional.
+- Optional startup writes are two-phase: read Wiper/TCON first, then write TCON
+  before Wiper if enabled. A failed optional write can leave the driver
+  initialized but degraded/uncertain so the application can read back or recover.
 
 ## Address Note
 
@@ -252,7 +262,8 @@ enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
 
 Hardware validation should verify the populated A1/A0 address, the WLAT and SHDN
 board strap behavior, General Call enablement, and the analog terminal limits for
-the selected RAB option. The helper math is idealized and does not include
+the selected RAB option. Opt-in startup writes must be measured on a safe load
+before production use. The helper math is idealized and does not include
 tolerance, wiper resistance, leakage, INL/DNL, or board-level loading.
 
 ## Examples

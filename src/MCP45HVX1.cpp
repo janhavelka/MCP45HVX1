@@ -120,25 +120,23 @@ Status MCP45HVX1::begin(const Config& config) {
 
   _syncRegister(cmd::REG_WIPER0, wiper);
   _syncRegister(cmd::REG_TCON0, tcon);
+  _initialized = true;
+  _driverState = DriverState::READY;
 
   if (_config.writeInitialTcon) {
-    st = _writeRegisterRaw(cmd::REG_TCON0, _config.initialTcon);
+    st = writeTcon(_config.initialTcon);
     if (!st.ok()) {
-      return resetAfterFailedBegin(st);
+      return st;
     }
-    _syncRegister(cmd::REG_TCON0, sanitizeTcon(_config.initialTcon));
   }
 
   if (_config.writeInitialWiper) {
-    st = _writeRegisterRaw(cmd::REG_WIPER0, _config.initialWiperCode);
+    st = writeWiper(_config.initialWiperCode);
     if (!st.ok()) {
-      return resetAfterFailedBegin(st);
+      return st;
     }
-    _syncRegister(cmd::REG_WIPER0, _config.initialWiperCode);
   }
 
-  _initialized = true;
-  _driverState = DriverState::READY;
   return Status::Ok();
 }
 

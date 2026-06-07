@@ -56,6 +56,8 @@ struct StressStats {
 
 StressStats gStress;
 
+void printStateLine();
+
 const char* skipWs(const char* p) {
   while (p != nullptr && (*p == ' ' || *p == '\t')) {
     ++p;
@@ -529,6 +531,9 @@ MCP45HVX1::Status beginDevice() {
   if (st.ok()) {
     gOutputStateUncertain = false;
     printActiveConfigLine();
+  } else if (gDev.hardwareStateUncertain()) {
+    LOGW("begin failed after a possible output-changing startup write; verify state");
+    printStateLine();
   }
   return st;
 }

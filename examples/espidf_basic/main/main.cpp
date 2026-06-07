@@ -421,6 +421,8 @@ bool parseTerminal(const char* text, MCP45HVX1::Terminal* out) {
   return false;
 }
 
+void printStateLine();
+
 void beginDriver() {
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
@@ -428,7 +430,12 @@ void beginDriver() {
   gCfg.busReset = resetBus;
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
-  printStatus("begin", gDev.begin(gCfg));
+  const MCP45HVX1::Status st = gDev.begin(gCfg);
+  printStatus("begin", st);
+  if (!st.ok() && gDev.hardwareStateUncertain()) {
+    puts("WARNING: begin failed after a possible output-changing startup write.");
+    printStateLine();
+  }
 }
 
 void printHelp() {

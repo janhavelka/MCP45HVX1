@@ -57,6 +57,7 @@ Affected paths:
 - software shutdown helper
 - terminal mode helper
 - `restorePowerOnDefaults()` / `resetToDefaults()`
+- optional output-changing startup writes in `begin()`
 - `writeRegister()`
 - General Call Wiper/TCON write and Wiper step helpers
 

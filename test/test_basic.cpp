@@ -46,6 +46,7 @@ struct FakeBus {
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
   int writeErrorAfterMutationRemaining = 0;
+  uint8_t writeErrorAfterMutationSkip = 0;
   uint8_t failAfterAppliedCommands = 0;
   uint32_t failReadCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
@@ -188,6 +189,10 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
       return st;
     }
     if (bus->writeErrorAfterMutationRemaining > 0) {
+      if (bus->writeErrorAfterMutationSkip > 0) {
+        bus->writeErrorAfterMutationSkip--;
+        return Status::Ok();
+      }
       bus->writeErrorAfterMutationRemaining--;
       return bus->writeError;
     }
@@ -204,11 +209,19 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
     if (bus->writeErrorAfterMutationRemaining > 0 &&
         bus->failAfterAppliedCommands > 0 &&
         appliedCommands >= bus->failAfterAppliedCommands) {
+      if (bus->writeErrorAfterMutationSkip > 0) {
+        bus->writeErrorAfterMutationSkip--;
+        continue;
+      }
       bus->writeErrorAfterMutationRemaining--;
       return bus->writeError;
     }
   }
   if (bus->writeErrorAfterMutationRemaining > 0) {
+    if (bus->writeErrorAfterMutationSkip > 0) {
+      bus->writeErrorAfterMutationSkip--;
+      return Status::Ok();
+    }
     bus->writeErrorAfterMutationRemaining--;
     return bus->writeError;
   }
@@ -387,10 +400,27 @@ void test_begin_reads_and_caches_registers() {
   TEST_ASSERT_EQUAL_HEX8(0xFB, s.cachedTcon);
   TEST_ASSERT_EQUAL_UINT32(0u, s.totalSuccess);
   TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(0u, bus.writeLogCount);
 
   const SettingsSnapshot byValue = dev.getSettings();
   TEST_ASSERT_EQUAL_HEX8(s.cachedWiper, byValue.cachedWiper);
   TEST_ASSERT_EQUAL_HEX8(s.cachedTcon, byValue.cachedTcon);
+}
+
+void test_begin_without_initial_writes_is_read_only() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.initialized);
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(0u, bus.writeLogCount);
 }
 
 void test_device_info_and_resistance_helpers() {
@@ -473,33 +503,136 @@ void test_begin_optional_initial_writes() {
   TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
 }
 
-void test_failed_begin_optional_write_clears_runtime_snapshot() {
+void test_begin_initial_wiper_write_is_explicit_opt_in() {
   FakeBus bus;
   Driver dev;
   Config cfg = makeConfig(bus);
-  cfg.i2cAddress = 0x3F;
   cfg.writeInitialWiper = true;
   cfg.initialWiperCode = 0x20;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(1u, bus.writeLogCount);
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, bus.writeAddrLog[0]);
+  TEST_ASSERT_EQUAL_UINT8(2u, bus.writeLenLog[0]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::WriteData),
+                         bus.writeByte0Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x20, bus.writeByte1Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(0x20, bus.wiper);
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, bus.tcon);
+}
+
+void test_begin_initial_tcon_success_then_wiper_mutate_fail_is_recoverable() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
   cfg.writeInitialTcon = true;
   cfg.initialTcon = 0x07;
-  bus.writeErrorRemaining = 1;
+  cfg.writeInitialWiper = true;
+  cfg.initialWiperCode = 0x20;
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeErrorAfterMutationSkip = 1;
+  bus.writeError = Status::Error(Err::I2C_BUS, "startup wiper failed after mutation", -21);
 
   Status st = dev.begin(cfg);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_INT32(-21, st.detail);
+  TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
+  TEST_ASSERT_EQUAL_HEX8(0x20, bus.wiper);
 
   SettingsSnapshot snap = dev.getSettings();
-  TEST_ASSERT_FALSE(snap.initialized);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+  TEST_ASSERT_TRUE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
                           static_cast<uint8_t>(snap.state));
-  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.config.i2cAddress);
-  TEST_ASSERT_EQUAL_UINT32(50u, snap.config.i2cTimeoutMs);
-  TEST_ASSERT_EQUAL_UINT8(5u, snap.config.offlineThreshold);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0xF7, snap.cachedTcon);
   TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+  TEST_ASSERT_EQUAL_UINT8(1u, snap.consecutiveFailures);
+  TEST_ASSERT_EQUAL_UINT32(1u, snap.totalFailures);
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x20, value);
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+}
+
+void test_begin_initial_tcon_mutate_fail_is_recoverable() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.writeInitialTcon = true;
+  cfg.initialTcon = 0x07;
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "startup TCON timeout", -22);
+
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.initialized);
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
   TEST_ASSERT_FALSE(snap.cachedTconKnown);
-  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalSuccess);
-  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalFailures);
-  TEST_ASSERT_EQUAL_UINT8(0u, snap.consecutiveFailures);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+}
+
+void test_begin_initial_write_pre_mutation_failure_does_not_set_uncertainty() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.writeInitialWiper = true;
+  cfg.initialWiperCode = 0x20;
+  bus.writeErrorRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_ADDR, "startup address NACK", -23);
+
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_8BIT, bus.wiper);
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.initialized);
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(snap.state));
+}
+
+void test_recover_after_failed_startup_write_reads_volatile_state() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.writeInitialWiper = true;
+  cfg.initialWiperCode = 0x22;
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_BUS, "startup write failed after mutation", -24);
+
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
+  const uint32_t readsAfterFailedBegin = bus.readCalls;
+
+  TEST_ASSERT_TRUE(dev.recover().ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterFailedBegin + 2u, bus.readCalls);
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0x22, snap.cachedWiper);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(snap.state));
 }
 
 void test_failed_begin_clears_stale_runtime_snapshot() {
@@ -1214,11 +1347,16 @@ int main() {
   RUN_TEST(test_begin_rejects_invalid_config);
   RUN_TEST(test_begin_accepts_documented_and_alternate_address_ranges);
   RUN_TEST(test_begin_reads_and_caches_registers);
+  RUN_TEST(test_begin_without_initial_writes_is_read_only);
   RUN_TEST(test_device_info_and_resistance_helpers);
   RUN_TEST(test_silicon_errata_info);
   RUN_TEST(test_begin_require_power_on_defaults);
   RUN_TEST(test_begin_optional_initial_writes);
-  RUN_TEST(test_failed_begin_optional_write_clears_runtime_snapshot);
+  RUN_TEST(test_begin_initial_wiper_write_is_explicit_opt_in);
+  RUN_TEST(test_begin_initial_tcon_success_then_wiper_mutate_fail_is_recoverable);
+  RUN_TEST(test_begin_initial_tcon_mutate_fail_is_recoverable);
+  RUN_TEST(test_begin_initial_write_pre_mutation_failure_does_not_set_uncertainty);
+  RUN_TEST(test_recover_after_failed_startup_write_reads_volatile_state);
   RUN_TEST(test_failed_begin_clears_stale_runtime_snapshot);
   RUN_TEST(test_read_write_wiper);
   RUN_TEST(test_wire_protocol_frames);
