@@ -129,8 +129,36 @@ COMMAND_ACTIONS = {
 }
 
 FORBIDDEN_PLACEHOLDER_RE = re.compile(
-    r"\b(TODO|FIXME|placeholder|stub|not implemented)\b", re.IGNORECASE
+    r"\b(TODO|FIXME|placeholder|stub|not implemented|coming soon|TBD|NYI|dummy)\b",
+    re.IGNORECASE,
 )
+
+ARDUINO_OUTPUT_WARNING_TOKENS = [
+    'warnOutputChanging("wiper"',
+    'warnOutputChanging("frac"',
+    'warnOutputChanging(increment ? "inc" : "dec")',
+    'warnOutputChanging("tcon"',
+    'warnOutputChanging("term")',
+    'warnOutputChanging("TCON software shutdown")',
+    'warnOutputChanging("mode")',
+    'warnOutputChanging("selftest output")',
+    'warnOutputChanging("stress_mix")',
+    'warnOutputChanging("defaults")',
+    'warnOutputChanging("zero")',
+    'warnOutputChanging("mid")',
+    'warnOutputChanging("max")',
+    'warnDangerous("raw register write")',
+    "[DANGER]",
+    "It affects every enabled device on the bus",
+]
+
+COMMAND_DOCS = [
+    "README.md",
+    "docs/IDF_PORT.md",
+    "docs/IDF_PORT_IMPLEMENTATION.md",
+    "docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md",
+    "docs/MCP45HVX1_ESP_IDF_PARITY_REPORT.md",
+]
 
 
 def fail(msg: str) -> None:
@@ -151,6 +179,17 @@ def ensure_missing(path: pathlib.Path, label: str) -> None:
 def require_token(text: str, token: str, label: str) -> None:
     if token not in text:
         fail(f"{label} missing token '{token}'")
+
+
+def help_commands_from_specs(specs: list[str]) -> set[str]:
+    commands: set[str] = set()
+    for spec in specs:
+        for part in re.split(r"\s+(?:/|\|)\s+", spec):
+            token = part.strip().split()[0] if part.strip() else ""
+            token = token.strip("[]")
+            if token:
+                commands.add(token)
+    return commands
 
 
 def main() -> int:
@@ -186,9 +225,20 @@ def main() -> int:
             if help_re.search(text) is None:
                 fail(f"mandatory command '{cmd}' missing from help text")
 
+    advertised_specs = re.findall(r'printHelpItem\s*\(\s*"([^"]+)"', text)
+    dispatch_commands = set(
+        re.findall(r'strcmp\s*\(\s*command\s*,\s*"([^"]+)"\s*\)\s*==\s*0', text)
+    )
+    for cmd in help_commands_from_specs(advertised_specs):
+        if cmd not in dispatch_commands:
+            fail(f"help advertises command '{cmd}' without handleCommand() dispatch")
+
     for cmd, token in COMMAND_ACTIONS.items():
         if token not in text:
             fail(f"command '{cmd}' missing expected action token '{token}'")
+
+    for token in ARDUINO_OUTPUT_WARNING_TOKENS:
+        require_token(text, token, "Arduino CLI output-changing warning/danger guard")
 
     general_call_body = text[text.find("void handleGeneralCall") :]
     for sub in ("arm", "disarm", "wiper", "tcon", "inc", "dec"):
@@ -242,6 +292,18 @@ def main() -> int:
         if FORBIDDEN_PLACEHOLDER_RE.search(content):
             fail(f"placeholder/stub marker found in {rel}")
 
+    for rel in COMMAND_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(
+            r"(?im)(command|cli|selftest|stress|color|gc|raw|wreg).{0,80}"
+            r"(TODO|FIXME|placeholder|stub|not implemented|coming soon|TBD|NYI|dummy)",
+            content,
+        ):
+            fail(f"advertised command placeholder/stub marker in {rel}")
+
     log_text = (common_dir / "Log.h").read_text(encoding="utf-8", errors="replace")
     build_text = (common_dir / "BuildConfig.h").read_text(encoding="utf-8", errors="replace")
     for token in (
@@ -254,7 +316,10 @@ def main() -> int:
 
     for path in (ROOT / "examples").rglob("*"):
         if path.is_file() and path.suffix in {".h", ".cpp"} and path.name != "Log.h":
-            if "\\033" in path.read_text(encoding="utf-8", errors="replace"):
+            rel = path.relative_to(ROOT).as_posix()
+            allowed_raw_ansi = rel == "examples/espidf_basic/main/main.cpp"
+            content = path.read_text(encoding="utf-8", errors="replace")
+            if ("\\033" in content or "\\x1B" in content) and not allowed_raw_ansi:
                 fail(f"raw ANSI escape must live only in Log.h: {path.relative_to(ROOT)}")
 
     print("CLI contract PASSED")

@@ -16,25 +16,40 @@ FORBIDDEN_PATTERNS = [
 ]
 
 
-def main() -> int:
+def git_lines(args: list[str]) -> tuple[int, list[str], str]:
     result = subprocess.run(
-        ["git", "ls-files"],
+        ["git", *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
     if result.returncode != 0:
-        print(result.stderr.strip())
-        return result.returncode
+        return result.returncode, [], result.stderr.strip()
+    return result.returncode, result.stdout.splitlines(), ""
+
+
+def main() -> int:
+    tracked_rc, tracked, tracked_err = git_lines(["ls-files"])
+    if tracked_rc != 0:
+        print(tracked_err)
+        return tracked_rc
+    untracked_rc, untracked, untracked_err = git_lines(["ls-files", "--others", "--exclude-standard"])
+    if untracked_rc != 0:
+        print(untracked_err)
+        return untracked_rc
 
     errors: list[str] = []
-    for rel in result.stdout.splitlines():
+    for rel in tracked:
         normalized = rel.replace("\\", "/")
         if normalized == "include/MCP45HVX1/Version.h":
             continue
         if any(pattern.search(normalized) for pattern in FORBIDDEN_PATTERNS):
-            errors.append(normalized)
+            errors.append(f"tracked generated artifact: {normalized}")
+    for rel in untracked:
+        normalized = rel.replace("\\", "/")
+        if any(pattern.search(normalized) for pattern in FORBIDDEN_PATTERNS):
+            errors.append(f"untracked generated artifact: {normalized}")
 
     if errors:
         print("Generated artifact check FAILED:")

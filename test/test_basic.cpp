@@ -6,13 +6,14 @@
 #include <limits>
 #include <type_traits>
 
+#include "MCP45HVX1/MCP45HVX1.h"
+
 #include "Arduino.h"
 #include "Wire.h"
 
 SerialClass Serial;
 TwoWire Wire;
 
-#include "MCP45HVX1/MCP45HVX1.h"
 #include "examples/common/I2cTransport.h"
 
 using namespace MCP45HVX1;
@@ -377,23 +378,55 @@ void test_begin_rejects_invalid_config() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
 }
 
-void test_begin_accepts_documented_and_alternate_address_ranges() {
-  FakeBus bus;
-  Driver dev;
-  Config cfg = makeConfig(bus);
-  cfg.i2cAddress = 0x3F;
-  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+void test_begin_address_matrix() {
+  struct AddressCase {
+    uint8_t address;
+    bool allowAlternate;
+    bool expectOk;
+    bool expectAlternate;
+  };
 
-  dev.end();
-  cfg = makeConfig(bus);
-  cfg.i2cAddress = 0x5C;
-  Status st = dev.begin(cfg);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
-                          static_cast<uint8_t>(st.code));
+  const AddressCase cases[] = {
+      {0x3C, false, true, false},
+      {0x3D, false, true, false},
+      {0x3E, false, true, false},
+      {0x3F, false, true, false},
+      {0x3B, false, false, false},
+      {0x40, false, false, false},
+      {0x5C, false, false, false},
+      {0x5D, false, false, false},
+      {0x5E, false, false, false},
+      {0x5F, false, false, false},
+      {0x5C, true, true, true},
+      {0x5D, true, true, true},
+      {0x5E, true, true, true},
+      {0x5F, true, true, true},
+      {0x5B, true, false, false},
+      {0x60, true, false, false},
+  };
 
-  cfg.allowAlternateAddressRange = true;
-  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
-  TEST_ASSERT_TRUE(dev.getDeviceInfo().usingAlternateAddressRange);
+  for (const AddressCase& tc : cases) {
+    FakeBus bus;
+    Driver dev;
+    Config cfg = makeConfig(bus);
+    cfg.i2cAddress = tc.address;
+    cfg.allowAlternateAddressRange = tc.allowAlternate;
+
+    Status st = dev.begin(cfg);
+    if (tc.expectOk) {
+      TEST_ASSERT_TRUE(st.ok());
+      TEST_ASSERT_TRUE(dev.isInitialized());
+      TEST_ASSERT_EQUAL_HEX8(tc.address, dev.getDeviceInfo().i2cAddress);
+      TEST_ASSERT_EQUAL(tc.expectAlternate, dev.getDeviceInfo().usingAlternateAddressRange);
+      TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
+    } else {
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                              static_cast<uint8_t>(st.code));
+      TEST_ASSERT_FALSE(dev.isInitialized());
+      TEST_ASSERT_EQUAL_UINT32(0u, bus.readCalls);
+      TEST_ASSERT_EQUAL_UINT32(0u, bus.writeCalls);
+    }
+  }
 }
 
 void test_begin_reads_and_caches_registers() {
@@ -793,6 +826,37 @@ void test_failed_begin_clears_stale_runtime_snapshot() {
   TEST_ASSERT_EQUAL_UINT8(0u, snap.consecutiveFailures);
 }
 
+void test_end_resets_lifecycle_without_device_io() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.writeWiper(0x55).ok());
+  const uint32_t readsBeforeEnd = bus.readCalls;
+  const uint32_t writesBeforeEnd = bus.writeCalls;
+
+  dev.end();
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+
+  uint8_t value = 0;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.readWiper(value).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.writeRegister(cmd::REG_WIPER0, 0x22).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.generalCallWriteTcon(0xFF).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.recover().code));
+  TEST_ASSERT_EQUAL_UINT32(readsBeforeEnd, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesBeforeEnd, bus.writeCalls);
+}
+
 void test_read_write_wiper() {
   FakeBus bus;
   Driver dev;
@@ -844,16 +908,53 @@ void test_wire_protocol_frames() {
   TEST_ASSERT_EQUAL_UINT8(cmd::READ_RESPONSE_LEN, bus.readRxLenLog[3]);
 }
 
-void test_7bit_wiper_rejects_out_of_range() {
-  FakeBus bus;
-  bus.resolution = Resolution::Bits7;
-  bus.wiper = cmd::WIPER_DEFAULT_7BIT;
-  Driver dev;
-  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+void test_variant_wiper_code_matrix() {
+  struct VariantCase {
+    Resolution resolution;
+    const uint8_t* accepted;
+    size_t acceptedCount;
+    uint8_t rejected;
+    bool hasRejected;
+  };
 
-  Status st = dev.writeWiper(0x80);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
-  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_7BIT, bus.wiper);
+  const uint8_t hv31Accepted[] = {0x00, 0x3F, 0x7F};
+  const uint8_t hv51Accepted[] = {0x00, 0x7F, 0x80, 0xFF};
+  const VariantCase cases[] = {
+      {Resolution::Bits7, hv31Accepted, sizeof(hv31Accepted) / sizeof(hv31Accepted[0]), 0x80,
+       true},
+      {Resolution::Bits8, hv51Accepted, sizeof(hv51Accepted) / sizeof(hv51Accepted[0]), 0x00,
+       false},
+  };
+
+  for (const VariantCase& tc : cases) {
+    FakeBus bus;
+    bus.resolution = tc.resolution;
+    bus.wiper = Driver::defaultWiperCode(tc.resolution);
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    for (size_t i = 0; i < tc.acceptedCount; ++i) {
+      const uint8_t code = tc.accepted[i];
+      TEST_ASSERT_TRUE(dev.writeWiper(code).ok());
+      TEST_ASSERT_EQUAL_HEX8(code, bus.wiper);
+      SettingsSnapshot snap = dev.getSettings();
+      TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+      TEST_ASSERT_EQUAL_HEX8(code, snap.cachedWiper);
+      TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+    }
+
+    if (tc.hasRejected) {
+      const uint32_t writesBeforeInvalid = bus.writeCalls;
+      const uint8_t wiperBeforeInvalid = bus.wiper;
+      Status st = dev.writeWiper(tc.rejected);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                              static_cast<uint8_t>(st.code));
+      TEST_ASSERT_EQUAL_HEX8(wiperBeforeInvalid, bus.wiper);
+      TEST_ASSERT_EQUAL_UINT32(writesBeforeInvalid, bus.writeCalls);
+      TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
+      TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+    }
+  }
 }
 
 void test_increment_decrement_clamp_and_cache() {
@@ -1107,19 +1208,19 @@ void test_write_wiper_mutate_then_fail_marks_uncertain() {
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.writeErrorAfterMutationRemaining = 1;
-  bus.writeError = Status::Error(Err::I2C_ERROR, "write failed after mutation", -11);
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "write timed out after mutation", -11);
   Status st = dev.writeWiper(0x55);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_HEX8(0x55, bus.wiper);
 
   SettingsSnapshot snap = dev.getSettings();
   TEST_ASSERT_FALSE(snap.cachedWiperKnown);
   TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
                           static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
   TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
                           static_cast<uint8_t>(dev.hardwareStateUncertainError().code));
 }
 
@@ -1129,16 +1230,51 @@ void test_write_tcon_mutate_then_fail_marks_uncertain() {
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
   bus.writeErrorAfterMutationRemaining = 1;
-  bus.writeError = Status::Error(Err::I2C_BUS, "bus failed after mutation", -12);
+  bus.writeError = Status::Error(Err::I2C_NACK_DATA, "data NACK after mutation", -12);
   Status st = dev.writeTcon(0x07);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
 
   SettingsSnapshot snap = dev.getSettings();
   TEST_ASSERT_FALSE(snap.cachedTconKnown);
   TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                          static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
+}
+
+void test_write_register_mutate_then_fail_marks_target_cache_uncertain() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "raw wiper timeout after mutation", -51);
+  Status st = dev.writeRegister(cmd::REG_WIPER0, 0x66);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0x66, bus.wiper);
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x66, value);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_DATA, "raw TCON data NACK after mutation", -52);
+  st = dev.writeRegister(cmd::REG_TCON0, 0x07);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
                           static_cast<uint8_t>(snap.hardwareStateUncertainError.code));
 }
 
@@ -1320,6 +1456,73 @@ void test_probe_preserves_register_mismatch() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+}
+
+void test_recover_preserves_transport_status_detail() {
+  struct RecoverErrorCase {
+    Err injected;
+    int32_t detail;
+  };
+
+  const RecoverErrorCase cases[] = {
+      {Err::I2C_TIMEOUT, -61},
+      {Err::I2C_BUS, -62},
+      {Err::I2C_NACK_DATA, -63},
+      {Err::I2C_NACK_ADDR, -64},
+  };
+
+  for (const RecoverErrorCase& tc : cases) {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(tc.injected, "recover injected read failure", tc.detail);
+
+    Status st = dev.recover();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(tc.injected),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(tc.detail, st.detail);
+    TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                            static_cast<uint8_t>(dev.state()));
+  }
+}
+
+void test_recover_keeps_uncertainty_until_all_unknown_registers_verified() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "wiper timeout after mutation", -71);
+  TEST_ASSERT_FALSE(dev.writeWiper(0x33).ok());
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_DATA, "tcon data NACK after mutation", -72);
+  TEST_ASSERT_FALSE(dev.writeTcon(0x07).ok());
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.cachedWiperKnown);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+
+  bus.failReadCall = bus.readCalls + 2U;
+  bus.readError = Status::Error(Err::I2C_BUS, "recover TCON read failed", -73);
+  Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_INT32(-73, st.detail);
+
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_EQUAL_HEX8(0x33, snap.cachedWiper);
+  TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_TRUE(snap.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(snap.state));
+
+  TEST_ASSERT_TRUE(dev.readTcon(snap.cachedTcon).ok());
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
 }
 
 void test_offline_threshold() {
@@ -1522,6 +1725,63 @@ void test_conversions() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, Driver::fractionFromCode(0xFF, Resolution::Bits7));
 }
 
+void test_fraction_endpoint_matrix_by_variant() {
+  struct FractionCase {
+    Resolution resolution;
+    float fraction;
+    uint8_t expectedCode;
+    float expectedReadback;
+  };
+
+  const FractionCase cases[] = {
+      {Resolution::Bits7, 0.0f, 0x00, 0.0f},
+      {Resolution::Bits7, 0.5f, 0x40, 0.504f},
+      {Resolution::Bits7, 1.0f, 0x7F, 1.0f},
+      {Resolution::Bits8, 0.0f, 0x00, 0.0f},
+      {Resolution::Bits8, 0.5f, 0x80, 0.502f},
+      {Resolution::Bits8, 1.0f, 0xFF, 1.0f},
+  };
+
+  for (const FractionCase& tc : cases) {
+    TEST_ASSERT_EQUAL_HEX8(tc.expectedCode, Driver::codeFromFraction(tc.fraction, tc.resolution));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, tc.expectedReadback,
+                             Driver::fractionFromCode(tc.expectedCode, tc.resolution));
+
+    FakeBus bus;
+    bus.resolution = tc.resolution;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    TEST_ASSERT_TRUE(dev.writeWiperFraction(tc.fraction).ok());
+    TEST_ASSERT_EQUAL_HEX8(tc.expectedCode, bus.wiper);
+
+    float readback = -1.0f;
+    TEST_ASSERT_TRUE(dev.readWiperFraction(readback).ok());
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, tc.expectedReadback, readback);
+  }
+
+  for (const Resolution resolution : {Resolution::Bits7, Resolution::Bits8}) {
+    FakeBus bus;
+    bus.resolution = resolution;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    const uint32_t writesBeforeInvalid = bus.writeCalls;
+    const uint8_t wiperBeforeInvalid = bus.wiper;
+
+    Status st = dev.writeWiperFraction(-0.01f);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                            static_cast<uint8_t>(st.code));
+    st = dev.writeWiperFraction(1.01f);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                            static_cast<uint8_t>(st.code));
+    st = dev.writeWiperFraction(std::numeric_limits<float>::quiet_NaN());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_UINT32(writesBeforeInvalid, bus.writeCalls);
+    TEST_ASSERT_EQUAL_HEX8(wiperBeforeInvalid, bus.wiper);
+    TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+  }
+}
+
 void test_fraction_read_write_helpers() {
   FakeBus bus;
   Driver dev;
@@ -1569,11 +1829,15 @@ void test_operations_reject_before_begin() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.writeWiper(0).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.writeTcon(0).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.readWiperFraction(fraction).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.writeWiperFraction(0.0f).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.incrementWiper().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.decrementWiper().code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.readTcon(value).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
@@ -1583,9 +1847,27 @@ void test_operations_reject_before_begin() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.readTerminalStatus(terminalStatus).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.readRegister(cmd::REG_WIPER0, value).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.writeRegister(cmd::REG_TCON0, 0xFF).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.readLastAddress(value).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.generalCallWriteWiper(0).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.generalCallWriteTcon(0xFF).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.generalCallIncrementWiper().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.generalCallDecrementWiper().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.resetI2cState().code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.restorePowerOnDefaults().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.resetToDefaults().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.recover().code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.probe().code));
 }
@@ -1628,7 +1910,7 @@ int main() {
   RUN_TEST(test_config_defaults);
   RUN_TEST(test_begin_rejects_invalid_config);
   RUN_TEST(test_begin_preserves_transport_status_except_address_nack);
-  RUN_TEST(test_begin_accepts_documented_and_alternate_address_ranges);
+  RUN_TEST(test_begin_address_matrix);
   RUN_TEST(test_begin_reads_and_caches_registers);
   RUN_TEST(test_begin_without_initial_writes_is_read_only);
   RUN_TEST(test_device_info_and_resistance_helpers);
@@ -1642,9 +1924,10 @@ int main() {
   RUN_TEST(test_begin_initial_write_pre_mutation_failure_does_not_set_uncertainty);
   RUN_TEST(test_recover_after_failed_startup_write_reads_volatile_state);
   RUN_TEST(test_failed_begin_clears_stale_runtime_snapshot);
+  RUN_TEST(test_end_resets_lifecycle_without_device_io);
   RUN_TEST(test_read_write_wiper);
   RUN_TEST(test_wire_protocol_frames);
-  RUN_TEST(test_7bit_wiper_rejects_out_of_range);
+  RUN_TEST(test_variant_wiper_code_matrix);
   RUN_TEST(test_increment_decrement_clamp_and_cache);
   RUN_TEST(test_tcon_write_sanitizes_reserved_bits);
   RUN_TEST(test_terminal_helpers);
@@ -1658,12 +1941,15 @@ int main() {
   RUN_TEST(test_write_wiper_pre_mutation_failure_does_not_set_uncertainty);
   RUN_TEST(test_write_wiper_mutate_then_fail_marks_uncertain);
   RUN_TEST(test_write_tcon_mutate_then_fail_marks_uncertain);
+  RUN_TEST(test_write_register_mutate_then_fail_marks_target_cache_uncertain);
   RUN_TEST(test_increment_decrement_partial_failure_marks_uncertain);
   RUN_TEST(test_general_call_mutate_then_fail_marks_uncertain);
   RUN_TEST(test_successful_readback_clears_uncertainty_only_after_all_unknown_verified);
   RUN_TEST(test_probe_does_not_update_health_but_recover_does);
   RUN_TEST(test_probe_preserves_transport_status_except_address_nack);
   RUN_TEST(test_probe_preserves_register_mismatch);
+  RUN_TEST(test_recover_preserves_transport_status_detail);
+  RUN_TEST(test_recover_keeps_uncertainty_until_all_unknown_registers_verified);
   RUN_TEST(test_offline_threshold);
   RUN_TEST(test_offline_blocks_normal_operations_without_bus_io);
   RUN_TEST(test_recover_is_explicit_path_out_of_offline);
@@ -1675,6 +1961,7 @@ int main() {
   RUN_TEST(test_zero_step_commands_are_noops);
   RUN_TEST(test_failed_bus_reset_updates_health);
   RUN_TEST(test_conversions);
+  RUN_TEST(test_fraction_endpoint_matrix_by_variant);
   RUN_TEST(test_fraction_read_write_helpers);
   RUN_TEST(test_operations_reject_before_begin);
   RUN_TEST(test_example_transport_maps_wire_errors_and_read_only_transactions);

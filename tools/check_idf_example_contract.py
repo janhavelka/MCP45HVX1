@@ -23,7 +23,8 @@ FORBIDDEN_INCLUDE_RE = re.compile(
 )
 
 FORBIDDEN_PLACEHOLDER_RE = re.compile(
-    r"\b(TODO|FIXME|placeholder|stub|not implemented|coming soon)\b", re.IGNORECASE
+    r"\b(TODO|FIXME|placeholder|stub|not implemented|coming soon|TBD|NYI|dummy)\b",
+    re.IGNORECASE,
 )
 
 IDF_FORBIDDEN_RE = re.compile(
@@ -33,7 +34,7 @@ IDF_FORBIDDEN_RE = re.compile(
 )
 
 RISKY_NARROW_CAST_RE = re.compile(
-    r"static_cast\s*<\s*uint8_t\s*>\s*\(\s*(v|reg|value|n)\s*\)"
+    r"static_cast\s*<\s*uint8_t\s*>\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)"
 )
 
 REQUIRED_NATIVE_TOKENS = [
@@ -116,6 +117,20 @@ def require_token(text: str, token: str, label: str) -> None:
         fail(f"{label} missing token '{token}'")
 
 
+def help_commands_from_idf_print_help(text: str) -> set[str]:
+    match = re.search(r"void\s+printHelp\s*\(\s*\)\s*\{(?P<body>.*?)\n\}", text, re.DOTALL)
+    if match is None:
+        fail("ESP-IDF printHelp() body missing")
+    commands: set[str] = set()
+    for spec in re.findall(r'puts\s*\(\s*"  ([^"]+)"\s*\)', match.group("body")):
+        for part in re.split(r"\s+(?:/|\|)\s+", spec):
+            token = part.strip().split()[0] if part.strip() else ""
+            token = token.strip("[]")
+            if token:
+                commands.add(token)
+    return commands
+
+
 def main() -> int:
     ns = runpy.run_path(str(ROOT / "tools" / "check_cli_contract.py"))
     commands = ns.get("MANDATORY_COMMANDS", [])
@@ -163,6 +178,9 @@ def main() -> int:
     for cmd, token in IDF_COMMAND_ACTIONS.items():
         if cmd in dispatch:
             require_token(text, token, f"ESP-IDF command '{cmd}' action")
+    for cmd in help_commands_from_idf_print_help(text):
+        if cmd not in dispatch:
+            fail(f"ESP-IDF help advertises command '{cmd}' without dispatch")
     for component in components:
         if re.search(rf"\b{re.escape(component)}\b", cmake) is None:
             fail(f"ESP-IDF CMake file missing component '{component}'")
@@ -197,10 +215,29 @@ def main() -> int:
         r"is(?:Primary|Alternate)Address\s*\(\s*static_cast<uint8_t>",
         r"write(?:Wiper|Tcon|Register)\s*\(\s*static_cast<uint8_t>",
         r"(?:incrementWiper|decrementWiper)\s*\(\s*static_cast<uint8_t>",
+        r"\(\s*uint8_t\s*\)\s*[A-Za-z_][A-Za-z0-9_]*",
+        r"uint8_t\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)",
         r"parseFloatArg\s*\([^;\n]*&&[^;\n]*(?:>=|<=)",
     ):
         if re.search(pat, handler):
             fail(f"ESP-IDF command handler bypasses bounded parse helper: {pat}")
+
+    for token in (
+        'printWarning("defaults',
+        'printWarning("wiper',
+        'printWarning("fraction write',
+        'printWarning("wiper preset',
+        'printWarning("wiper step',
+        'printWarning("tcon',
+        'printWarning("terminal command',
+        'printWarning("software shutdown',
+        'printWarning("mode command',
+        'printWarning("selftest output',
+        'printWarning("stress_mix',
+        'printDanger("raw write',
+        'printDanger("raw register write',
+    ):
+        require_token(text, token, "ESP-IDF output-changing warning/danger guard")
 
     if "color [on|off]" in text:
         for token in (
