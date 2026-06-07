@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 1.0.x   | Pre-production hardening branch |
 
 ## Reporting a Vulnerability
 
@@ -22,13 +22,22 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 ## Scope
 
-This library is designed for embedded systems. Security considerations include:
-- No dynamic memory allocation in steady state (reduces attack surface)
-- No network code (networking is out of scope for this library)
-- No persistent storage by default (NVS side effects are opt-in)
+This library is designed for embedded systems that may control real analog and
+high-voltage circuits. Security and safety considerations include:
+- No dynamic memory allocation in steady-state core driver code
+- No network code in the core driver
+- No persistent storage in the core driver or bundled examples
+- I2C transport callbacks, bus ownership, locking, timeout policy, and recovery
+  policy are application responsibilities
+- General Call and output-changing commands require hardware validation before
+  use in deployed systems
 
 ## Security Best Practices for Users
 
-- Always validate external inputs before passing to `Config`
-- Use hardware watchdogs in production deployments
-- Keep dependencies updated
+- Validate external inputs before passing values to `Config` or output-changing
+  Wiper/TCON APIs.
+- Serialize access to each driver instance and its shared I2C transport.
+- Treat failed state-changing writes as potentially applied until readback or
+  `recover()` proves the volatile state.
+- Use watchdogs and independent analog safety limits in deployed hardware.
+- Keep toolchains and dependencies updated.

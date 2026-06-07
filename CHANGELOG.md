@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Documentation and package metadata now describe the library as a
+  pre-production candidate pending hardware validation rather than a
+  production-ready release.
+- Added authoritative API contract, hardware validation, and release checklist
+  docs for release gating, evidence capture, and package export scope.
+- `library.json` export rules now exclude large reference PDFs, extracted
+  datasheet markdown, tests, tools, and CI metadata from normal PlatformIO
+  package archives.
 - ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build
   of the full bring-up CLI command contract.
 - ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
@@ -36,6 +44,8 @@
 
 ## 1.0.0
 
-- Initial production-style MCP45HVX1 driver.
+- Initial framework-neutral MCP45HVX1 driver package.
 - Added injected I2C transport, status/error model, health tracking, register
   helpers, wiper and TCON APIs, General Call helpers, examples, tests, and docs.
+- Release tag and production-readiness claims remain pending until the release
+  checklist evidence is complete.

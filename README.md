@@ -3,6 +3,10 @@
 Framework-neutral MCP45HVX1 high-voltage I2C digital potentiometer driver for
 ESP32 (Arduino/PlatformIO and ESP-IDF).
 
+Current release status: pre-production candidate pending hardware validation.
+Software tests and static guards do not prove analog accuracy, high-voltage
+safety, or General Call safety on a shared bus.
+
 ## Features
 
 - **Injected I2C transport** - no `Wire` dependency in library code
@@ -53,8 +57,9 @@ The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 `vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
 sources or compatibility facades.
 
-Validation status: command parity is checked by repo-local contract scripts.
-Hardware smoke tests are still pending until target devices are available.
+Software validation status: command parity is checked by repo-local contract
+scripts. Hardware smoke tests are still pending until target devices are
+available, and no high-voltage validation is claimed without measurement logs.
 
 ## Quick Start
 
@@ -441,7 +446,9 @@ pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio test -e native
 python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
+python tools/check_generated_artifacts.py
 python scripts/generate_version.py check
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
@@ -450,15 +457,26 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
+## Packaging
+
+`library.json` defines the package export policy. Normal PlatformIO packages
+include headers, source, examples, metadata, and current core docs. Large
+reference PDFs, extracted datasheet markdown, tests, tools, CI metadata, and
+local build output are intentionally excluded from normal packages to keep the
+install artifact focused and reproducible. The full reference corpus remains in
+the repository for audit and documentation work.
+
 ## Documentation
 
 - [Assumptions](ASSUMPTIONS.md)
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
 - <a href="docs/05_register_map.md">Register Map</a>
 - <a href="docs/register_reference.md">Driver Register Reference</a>
-- <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
+- <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
+- <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
 - <a href="docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md">Device Model And Errata Report</a>
+- <a href="docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md">Docs Release Metadata Report</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
 - <a href="docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md">CLI Parity And Color Report</a>

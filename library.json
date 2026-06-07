@@ -47,5 +47,42 @@
   "build": {
     "includeDir": "include",
     "srcDir": "src"
+  },
+  "export": {
+    "include": [
+      "include/**",
+      "src/**",
+      "examples/**",
+      "scripts/generate_version.py",
+      "CMakeLists.txt",
+      "idf_component.yml",
+      "library.json",
+      "platformio.ini",
+      "README.md",
+      "CHANGELOG.md",
+      "LICENSE",
+      "SECURITY.md",
+      "CONTRIBUTING.md",
+      "ASSUMPTIONS.md",
+      "MCP45HVX1_digital_potentiometer_implementation_manual.md",
+      "docs/IDF_PORT.md",
+      "docs/IDF_PORT_IMPLEMENTATION.md",
+      "docs/MCP45HVX1_API_CONTRACT.md",
+      "docs/MCP45HVX1_HARDWARE_VALIDATION.md",
+      "docs/hardware_validation.md",
+      "docs/MCP45HVX1_RELEASE_CHECKLIST.md",
+      "docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md",
+      "docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md"
+    ],
+    "exclude": [
+      ".github/**",
+      ".pio/**",
+      "test/**",
+      "tests/**",
+      "tools/**",
+      "docs/*.pdf",
+      "docs/extracted-md/**",
+      "docs/pdf-extracted-md/**"
+    ]
   }
 }

@@ -1,5 +1,11 @@
 # MCP45HVX1 CLI Parity And Color Report
 
+> Historical report from the CLI parity pass. Current ESP-IDF behavior is
+> documented in `docs/MCP45HVX1_ESP_IDF_PARITY_REPORT.md`, and the public
+> runtime/API contract is documented in `docs/MCP45HVX1_API_CONTRACT.md`.
+> Validation counts and branch/commit fields below are preserved as historical
+> evidence, not current release evidence.
+
 Branch: `main`
 
 Base commit inspected: `9a969fd` (`Enhance health diagnostics and output formatting for MCP45HVX1`)

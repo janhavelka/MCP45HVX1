@@ -13,7 +13,10 @@ FORBIDDEN_PATTERNS = [
     re.compile(r"(^|/)__pycache__/"),
     re.compile(r"(^|/)(html|xml|latex)/"),
     re.compile(r"\.(o|obj|a|lib|map|elf|bin|hex|gcda|gcno|tar|tgz|zip)$", re.IGNORECASE),
+    re.compile(r"\.tar\.gz$", re.IGNORECASE),
 ]
+
+IGNORED_ROOT_ARCHIVE_GLOBS = ("*.tar.gz", "*.tgz", "*.zip")
 
 
 def git_lines(args: list[str]) -> tuple[int, list[str], str]:
@@ -50,6 +53,10 @@ def main() -> int:
         normalized = rel.replace("\\", "/")
         if any(pattern.search(normalized) for pattern in FORBIDDEN_PATTERNS):
             errors.append(f"untracked generated artifact: {normalized}")
+    for glob in IGNORED_ROOT_ARCHIVE_GLOBS:
+        for path in ROOT.glob(glob):
+            if path.is_file():
+                errors.append(f"ignored generated artifact: {path.name}")
 
     if errors:
         print("Generated artifact check FAILED:")

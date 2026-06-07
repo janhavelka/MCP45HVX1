@@ -8,3 +8,19 @@ targets:
   - esp32s3
 dependencies:
   idf: ">=6.0.1"
+files:
+  exclude:
+    - ".github/**/*"
+    - ".pio/**/*"
+    - "test/**/*"
+    - "tests/**/*"
+    - "tools/**/*"
+    - "prompts/**/*"
+    - "examples/01_basic_bringup_cli/**/*"
+    - "examples/common/**/*"
+    - "docs/**/*.pdf"
+    - "docs/extracted-md/**/*"
+    - "docs/pdf-extracted-md/**/*"
+    - "*.tar.gz"
+    - "*.tgz"
+    - "*.zip"

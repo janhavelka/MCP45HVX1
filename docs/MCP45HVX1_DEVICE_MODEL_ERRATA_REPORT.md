@@ -30,14 +30,15 @@ errata release gate.
   SHDN, WLAT, and board timing are stable before `begin()`. The core does not
   insert arbitrary POR/BOR delays and `Config::nowMs` is used for timestamps,
   not startup delays.
-- Package and README descriptions no longer claim production-grade readiness.
+- Package and README descriptions no longer claim production readiness without
+  hardware evidence.
 
 ## Errata Gate Added
 
 - `SiliconErrataInfo` exposes release-gate, shared-bus risk-acceptance, and
   General Call isolated-bus evidence flags.
 - Arduino and ESP-IDF CLIs print those errata gate fields.
-- `docs/hardware_validation.md`, `docs/register_reference.md`, and
+- `docs/MCP45HVX1_HARDWARE_VALIDATION.md`, `docs/register_reference.md`, and
   `docs/MCP45HVX1_RELEASE_CHECKLIST.md` require silicon/errata review before
   production release.
 - Output-changing General Call commands require isolated-bus evidence; shared

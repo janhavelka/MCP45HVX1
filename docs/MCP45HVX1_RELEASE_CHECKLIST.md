@@ -1,39 +1,120 @@
 # MCP45HVX1 Release Checklist
 
-This checklist is a release gate for production firmware and hardware claims.
-Passing software tests alone is not enough to claim General Call safety, analog
-accuracy, or production readiness.
+This checklist gates release claims for this repository. Passing software checks
+alone is not enough to claim production readiness, high-voltage validation,
+analog accuracy, or General Call safety.
+
+Current state: pre-production candidate pending hardware validation. No release
+tag is created by this checklist; create a tag only after the gates below are
+complete and an operator explicitly approves the release.
+
+## Repository State
+
+| Gate | Evidence |
+|---|---|
+| Correct release branch | `git branch --show-current` recorded |
+| Clean worktree before release | `git status --short` empty |
+| Remote synchronized | `git pull --ff-only` completed |
+| No generated artifacts | `python tools/check_generated_artifacts.py` passed after packaging |
+
+## Version, Changelog, And Tag Policy
+
+| Gate | Evidence |
+|---|---|
+| Version files agree | `library.json`, `idf_component.yml`, and generated `include/MCP45HVX1/Version.h` reviewed |
+| Version check passed | `python scripts/generate_version.py check` |
+| Changelog finalized | `CHANGELOG.md` has the intended release section and no stale overclaims |
+| Tag status recorded | No tag exists yet, or intended tag such as `v1.0.0` is recorded |
+| Tag created only after approval | Tag command/log recorded if a release is approved |
+
+If version `1.0.0` is retained before hardware evidence exists, describe it as
+an engineering or pre-production package version. Do not call it
+production-ready or industry-grade.
+
+## Software Validation
+
+| Gate | Command/evidence |
+|---|---|
+| Core timing guard | `python tools/check_core_timing_guard.py` |
+| Arduino/CLI contract | `python tools/check_cli_contract.py` |
+| ESP-IDF example contract | `python tools/check_idf_example_contract.py` |
+| Generated artifact guard | `python tools/check_generated_artifacts.py` |
+| Version check | `python scripts/generate_version.py check` |
+| Native tests | `python -m platformio test -e native` |
+| Arduino ESP32-S3 build | `python -m platformio run -e esp32s3dev` |
+| Arduino ESP32-S2 build | `python -m platformio run -e esp32s2dev` |
+| Pure ESP-IDF esp32s3 build | `idf.py -C examples/espidf_basic set-target esp32s3 build`, or CI log link |
+| Pure ESP-IDF esp32s2 build | `idf.py -C examples/espidf_basic set-target esp32s2 build`, or CI log link |
+
+Remote CI can be cited only when the workflow actually ran for the release
+commit. Local checks and CI checks are separate evidence.
+
+## Packaging
+
+| Gate | Evidence |
+|---|---|
+| Package pack | `python -m platformio pkg pack` passed |
+| Generated tarball removed | package archive removed before commit |
+| Export policy reviewed | `library.json` export section reviewed |
+| ESP-IDF file policy reviewed | `idf_component.yml` files/exclude section reviewed |
+| Package size accepted | packed archive size recorded |
+| Large reference docs decision | PDFs and extracted datasheet markdown are intentionally excluded from normal packages |
+
+Normal packages should include headers, source, examples, metadata, and current
+core docs. Large reference PDFs and extracted audit markdown stay in the
+repository unless a release explicitly decides to ship them.
+
+## Documentation Gates
+
+| Gate | Evidence |
+|---|---|
+| API contract current | `docs/MCP45HVX1_API_CONTRACT.md` reviewed |
+| Hardware validation doc current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` reviewed |
+| Release checklist current | this file reviewed |
+| Stale reports handled | historical reports have superseded/current-status notes |
+| README honesty | no unsupported production/industry/hardware-validation claims |
+| SECURITY/CONTRIBUTING current | no stale persistent-storage or missing-format-tool references |
 
 ## Silicon And Errata
 
-- Record package marking, date code, datasheet revision, and errata revision.
-- Review `DS80000649B` and any newer Microchip errata before release approval.
-- Treat Rev A1 through `1518NNN`, unreadable markings, or unknown silicon as
-  affected until proven otherwise.
-- If silicon is affected or unknown, use an isolated MCP45HVX1 bus or record
-  explicit shared-bus risk acceptance.
-- Do not enable output-changing General Call commands on a shared bus without
-  isolated-bus evidence and documented system-level acceptance.
+| Gate | Evidence |
+|---|---|
+| Package marking/date code | recorded in hardware validation log |
+| Datasheet and errata revisions | recorded in hardware validation log |
+| `DS80000649B` review | completed against actual silicon |
+| Affected/unknown silicon decision | isolated bus or shared-bus risk acceptance recorded |
+| General Call release decision | isolated-bus evidence or explicit risk acceptance |
 
-## Startup And Pins
+Treat Rev A1 through `1518NNN`, unreadable markings, or unknown silicon as
+affected until proven otherwise.
 
-- Confirm VL, V+, V-, reset, SHDN, and WLAT are stable before `begin()`.
-- Account for `TBORD` = 10 us typical / 20 us maximum after reset exit.
-- Document SHDN active-low hardware behavior and WLAT board strap/control.
-- Verify that any optional startup Wiper/TCON writes are intentional for the
-  analog circuit and have a recovery path if they fail.
+## Hardware/HIL Evidence
 
-## Hardware Validation
+| Gate | Evidence |
+|---|---|
+| Safe read-only HIL | `begin`, `probe`, `read`, `state`, `drv`, `selftest safe`, and read-only `stress` logs |
+| Address strap tests | A1/A0 matrix evidence for `0x3C..0x3F` or documented alternate behavior |
+| POR/BOR rail cycling | rail cycle logs, POR defaults, and `TBORD` margin |
+| I2C fault injection | address NACK, data NACK, timeout, bus error, unplug/replug, reset behavior |
+| Output-changing HIL | Wiper/TCON/inc/dec/raw/startup-write baseline, measurement, restore logs |
+| SHDN/WLAT checks | physical override and readback-vs-output evidence if pins are wired |
+| Low-voltage analog evidence | P0A/P0W/P0B voltage/current measurements on safe load |
+| High-voltage evidence | required only if any high-voltage validation claim is made |
+| General Call isolated-bus evidence | ACK/readback/analog measurement on isolated bus |
 
-- Validate safe load, rail limits, wiper current, and analog output externally.
-- Confirm register readback is not treated as proof of physical movement when
-  WLAT, SHDN, or external circuitry can override the output.
-- Log HIL measurements for Wiper, TCON, shutdown, WLAT, and General Call cases.
-- Record whether the standard address range `0x3C-0x3F` or alternate range
-  `0x5C-0x5F` was verified on the actual board.
+Use `docs/MCP45HVX1_HARDWARE_VALIDATION.md` for templates and detailed
+measurement requirements.
 
-## Software Release
+## Final Signoff
 
-- Run the repo validation scripts and PlatformIO native/ESP32 builds.
-- Confirm generated artifacts and version metadata match the intended release.
-- Keep release notes explicit about remaining hardware-validation limitations.
+| Field | Value |
+|---|---|
+| Release commit | Pending |
+| Version | Pending |
+| Tag | Pending |
+| CI run | Pending |
+| Package artifact and size | Pending |
+| Hardware evidence bundle | Pending |
+| Remaining risk acceptances | Pending |
+| Reviewer | Pending |
+| Date | Pending |

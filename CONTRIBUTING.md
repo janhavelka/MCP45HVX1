@@ -14,10 +14,13 @@ Thank you for considering contributing to this project!
 ## Guidelines
 
 ### Code Style
-- Follow existing code style (see `.clang-format`)
+- Follow the existing local style; this repository does not currently carry a
+  formatter configuration file.
 - Use `constexpr` instead of macros for constants
 - Prefer explicit over implicit
 - No heap allocations in steady-state library code
+- Keep core code under `include/` and `src/` framework-neutral. Arduino and
+  ESP-IDF APIs belong in examples or adapters.
 
 ### Commits
 - Use [Conventional Commits](https://www.conventionalcommits.org/) format:
@@ -32,19 +35,23 @@ Thank you for considering contributing to this project!
 - Keep PRs focused (one feature/fix per PR)
 - Update documentation if needed
 - Add changelog entry under `[Unreleased]`
-- Ensure CI passes
+- Run the relevant local checks from `docs/MCP45HVX1_RELEASE_CHECKLIST.md` and
+  ensure CI passes
 
 ### What We Accept
 - Bug fixes
 - Documentation improvements
 - Performance improvements (with benchmarks)
 - New examples (if they demonstrate a common use case)
+- Hardware-validation evidence and release-gate documentation
 
 ### What We Probably Won't Accept
 - Breaking API changes without discussion
 - Heavy dependencies
 - Platform-specific code in the library core
 - Features that add heap allocations in steady state
+- Claims of hardware, analog, high-voltage, or industry readiness without logs
+  and measurement evidence
 
 ## Questions?
 

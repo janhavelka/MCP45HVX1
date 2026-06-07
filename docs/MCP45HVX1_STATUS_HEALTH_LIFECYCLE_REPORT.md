@@ -67,8 +67,9 @@ Updated public Doxygen and README contract text for:
 - `resetI2cState()` interface-only semantics;
 - deleted copy/move policy.
 
-`docs/hardware_validation.md` now includes bench checks for status mapping,
-probe side effects, reset-without-proof behavior, and recover readback.
+`docs/MCP45HVX1_HARDWARE_VALIDATION.md` now includes bench checks for status
+mapping, probe side effects, reset-without-proof behavior, and recover
+readback.
 
 ## Tests Added
 

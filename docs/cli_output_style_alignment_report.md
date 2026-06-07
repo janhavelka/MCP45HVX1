@@ -1,5 +1,11 @@
 # MCP45HVX1 CLI Output Style Alignment Report
 
+> Historical report. Current CLI behavior is documented in `README.md`,
+> `docs/MCP45HVX1_API_CONTRACT.md`, and
+> `docs/MCP45HVX1_ESP_IDF_PARITY_REPORT.md`. Runtime color toggles now exist in
+> both Arduino and ESP-IDF CLIs; the limitation recorded near the end of this
+> report is superseded.
+
 ## Sibling Projects Inspected
 
 - `BME280`: primary reference for compact health/detail views, stress progress, stress summary, first/last failure reporting, and grouped help.
@@ -161,4 +167,6 @@ Expected hardware-session checks:
 
 - Hardware output was not captured in this pass; validation covered compile/tests and expected manual CLI checks are documented above.
 - The CLI does not implement retry logic, so summaries report attempts and failures but no retry count.
-- ANSI color is controlled by the existing shared macros rather than a runtime color toggle.
+- Superseded: this report originally said ANSI color had no runtime toggle.
+  Current Arduino and ESP-IDF CLIs support `color on` and `color off`; compile
+  time color disable remains available.
