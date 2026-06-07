@@ -54,3 +54,16 @@ or disconnected analog path before using startup writes on real circuits.
 Software cannot validate terminal current, analog rail safety, SHDN/WLAT
 overrides, or external circuit response. Record external measurements before
 enabling output-changing startup writes in production firmware.
+
+## Status, Probe, and Recover Checks
+
+Use safe loads and induced transport faults to confirm that software status does
+not overstate hardware proof.
+
+| Check | Expected result | Observed |
+|---|---|---|
+| Address NACK during `begin()` or `probe()` | API reports `DEVICE_NOT_FOUND` and preserves numeric detail | Pending bench test |
+| Timeout, bus error, or data NACK during `begin()` or `probe()` | API preserves the original public status code | Pending bench test |
+| Successful `probe()` while DEGRADED | Probe reports presence but does not change health counters or state | Pending bench test |
+| Successful `resetI2cState()` while DEGRADED/OFFLINE | Bus reset callback runs, but READY is not reported until a tracked device read or `recover()` succeeds | Pending bench test |
+| `recover()` after OFFLINE or uncertainty | Wiper and TCON are read back; READY and uncertainty clearing occur only after required readback succeeds | Pending bench test |

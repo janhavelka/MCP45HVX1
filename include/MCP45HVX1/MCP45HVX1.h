@@ -100,8 +100,19 @@ struct SettingsSnapshot {
 };
 
 /// MCP45HVX1 driver class.
+///
+/// The driver is stateful: it stores non-owning callback pointers, user
+/// contexts, health counters, and volatile register cache state. Callback
+/// targets and user contexts must outlive every call that can use them. Public
+/// APIs are synchronous, not internally serialized, and not ISR-safe.
 class MCP45HVX1 {
 public:
+  MCP45HVX1() = default;
+  MCP45HVX1(const MCP45HVX1&) = delete;
+  MCP45HVX1& operator=(const MCP45HVX1&) = delete;
+  MCP45HVX1(MCP45HVX1&&) = delete;
+  MCP45HVX1& operator=(MCP45HVX1&&) = delete;
+
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -114,6 +125,8 @@ public:
   /// If an optional startup write fails, the driver preserves config/transport
   /// state for readback/recover diagnostics and uses hardwareStateUncertain()
   /// for ambiguous write failures.
+  /// Baseline address NACK maps to DEVICE_NOT_FOUND; timeout, bus, data-NACK,
+  /// generic I2C, and register-format failures are returned as reported.
   ///
   /// @param config Transport callbacks, device address, variant, and startup policy.
   /// @return Status::Ok() when the baseline cache is valid and optional writes, if any, succeeded.
@@ -130,16 +143,25 @@ public:
   // Diagnostics
   // =========================================================================
 
-  /// Check if device is present on the bus without changing health counters.
+  /// Check if device is present on the bus without changing health counters or
+  /// Wiper/TCON cache. The raw read may update address-pointer knowledge.
+  /// Address NACK maps to DEVICE_NOT_FOUND; timeout, bus, data-NACK, generic I2C,
+  /// and register-format errors are returned as reported.
   /// @return Status::Ok() on ACK/read success, otherwise transport or presence error.
   Status probe();
 
   /// Attempt to recover from DEGRADED/OFFLINE or startup-write uncertainty by tracked register reads.
+  /// This does not run the bus-reset callback. It reads Wiper then TCON, refreshes
+  /// caches, clears hardware uncertainty only for verified readback, and returns
+  /// READY only after both reads succeed. If recovery starts OFFLINE and only
+  /// partially succeeds, the OFFLINE latch is restored.
   /// @return Status::Ok() if Wiper/TCON were read and health returned online.
   Status recover();
 
   /// Run the optional board-provided I2C bus/software-reset callback.
   /// This resets only the I2C interface state, not Wiper/TCON registers.
+  /// A successful callback does not prove device presence, update register cache,
+  /// clear hardware uncertainty, or mark an OFFLINE/DEGRADED driver READY.
   /// @return Status::Ok() when the callback succeeds, or UNSUPPORTED if none was provided.
   Status resetI2cState();
 
@@ -440,7 +462,7 @@ private:
   Status _i2cWriteReadTracked(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                               uint8_t* rxBuf, size_t rxLen);
   Status _i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len);
-  Status _busResetTracked(bool trackSuccess);
+  Status _busResetTracked();
 
   // Register helpers
   Status _readRegisterRaw(uint8_t reg, uint8_t& value);
@@ -459,6 +481,7 @@ private:
   static bool _isValidRegister(uint8_t reg);
   static bool _isWritableRegister(uint8_t reg);
   static bool _isValidWiperCode(uint8_t code, Resolution resolution);
+  static Status _presenceReadFailureStatus(const Status& st);
   static uint8_t _terminalMask(Terminal terminal);
   static uint8_t _tconForMode(TerminalMode mode);
   void _syncRegister(uint8_t reg, uint8_t value);

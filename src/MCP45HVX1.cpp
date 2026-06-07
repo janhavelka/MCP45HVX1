@@ -90,21 +90,13 @@ Status MCP45HVX1::begin(const Config& config) {
   uint8_t wiper = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, wiper);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return resetAfterFailedBegin(st);
-    }
-    return resetAfterFailedBegin(
-        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    return resetAfterFailedBegin(_presenceReadFailureStatus(st));
   }
 
   uint8_t tcon = 0;
   st = _readRegisterRaw(cmd::REG_TCON0, tcon);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return resetAfterFailedBegin(st);
-    }
-    return resetAfterFailedBegin(
-        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    return resetAfterFailedBegin(_presenceReadFailureStatus(st));
   }
 
   if (_config.requirePowerOnDefaults) {
@@ -214,10 +206,7 @@ Status MCP45HVX1::probe() {
   uint8_t value = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, value);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return st;
-    }
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return _presenceReadFailureStatus(st);
   }
   return Status::Ok();
 }
@@ -257,17 +246,13 @@ Status MCP45HVX1::resetI2cState() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
-  const bool startedOffline = _driverState == DriverState::OFFLINE;
-  Status st = _busResetTracked(!startedOffline);
+  Status st = _busResetTracked();
   if (!st.ok()) {
     return st;
   }
 
   _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
-  if (startedOffline) {
-    return st;
-  }
   return st;
 }
 
@@ -672,7 +657,7 @@ Status MCP45HVX1::_i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len)
   return _updateHealth(st);
 }
 
-Status MCP45HVX1::_busResetTracked(bool trackSuccess) {
+Status MCP45HVX1::_busResetTracked() {
   if (_config.busReset == nullptr) {
     return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
@@ -684,7 +669,7 @@ Status MCP45HVX1::_busResetTracked(bool trackSuccess) {
   if (!st.ok()) {
     return _updateHealth(st);
   }
-  return trackSuccess ? _updateHealth(st) : st;
+  return st;
 }
 
 // ===========================================================================
@@ -893,6 +878,13 @@ bool MCP45HVX1::_isWritableRegister(uint8_t reg) {
 
 bool MCP45HVX1::_isValidWiperCode(uint8_t code, Resolution resolution) {
   return code <= maxWiperCode(resolution);
+}
+
+Status MCP45HVX1::_presenceReadFailureStatus(const Status& st) {
+  if (st.code == Err::I2C_NACK_ADDR) {
+    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+  }
+  return st;
 }
 
 uint8_t MCP45HVX1::_terminalMask(Terminal terminal) {

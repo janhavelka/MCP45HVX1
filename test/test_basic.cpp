@@ -3,6 +3,8 @@
 
 #include <unity.h>
 
+#include <type_traits>
+
 #include "Arduino.h"
 #include "Wire.h"
 
@@ -17,6 +19,15 @@ using namespace MCP45HVX1;
 namespace {
 
 using Driver = ::MCP45HVX1::MCP45HVX1;
+
+static_assert(!std::is_copy_constructible<Driver>::value,
+              "MCP45HVX1 must not be copy constructible");
+static_assert(!std::is_copy_assignable<Driver>::value,
+              "MCP45HVX1 must not be copy assignable");
+static_assert(!std::is_move_constructible<Driver>::value,
+              "MCP45HVX1 must not be move constructible");
+static_assert(!std::is_move_assignable<Driver>::value,
+              "MCP45HVX1 must not be move assignable");
 
 struct FakeBus {
   static constexpr size_t MAX_LOG = 16;
@@ -406,6 +417,53 @@ void test_begin_reads_and_caches_registers() {
   const SettingsSnapshot byValue = dev.getSettings();
   TEST_ASSERT_EQUAL_HEX8(s.cachedWiper, byValue.cachedWiper);
   TEST_ASSERT_EQUAL_HEX8(s.cachedTcon, byValue.cachedTcon);
+}
+
+void test_begin_preserves_transport_status_except_address_nack() {
+  {
+    FakeBus bus;
+    Driver dev;
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_TIMEOUT, "baseline timeout", -31);
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-31, st.detail);
+    TEST_ASSERT_FALSE(dev.isInitialized());
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_BUS, "baseline bus error", -32);
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-32, st.detail);
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_NACK_DATA, "baseline data NACK", -33);
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-33, st.detail);
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_NACK_ADDR, "baseline address NACK", -34);
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-34, st.detail);
+  }
 }
 
 void test_begin_without_initial_writes_is_read_only() {
@@ -887,6 +945,60 @@ void test_general_call_helpers() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
+void test_i2c_reset_ok_from_degraded_does_not_mark_ready_without_device_read() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  Status st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  const uint32_t readsBeforeReset = bus.readCalls;
+
+  st = dev.resetI2cState();
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(readsBeforeReset, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.resetCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+
+  bus.readErrorRemaining = 1;
+  st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_i2c_reset_ok_then_device_read_success_returns_ready() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  TEST_ASSERT_FALSE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  const uint32_t readsBeforeReset = bus.readCalls;
+
+  TEST_ASSERT_TRUE(dev.resetI2cState().ok());
+  TEST_ASSERT_EQUAL_UINT32(readsBeforeReset, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.readWiper(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(bus.wiper, value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalSuccess());
+}
+
 void test_write_wiper_pre_mutation_failure_does_not_set_uncertainty() {
   FakeBus bus;
   Driver dev;
@@ -1035,11 +1147,20 @@ void test_probe_does_not_update_health_but_recover_does() {
   Driver dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
-  bus.readErrorRemaining = 1;
   Status st = dev.probe();
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+
+  bus.readErrorRemaining = 1;
+  st = dev.probe();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
 
   bus.readErrorRemaining = 1;
   bus.nowMs = 2000;
@@ -1049,6 +1170,60 @@ void test_probe_does_not_update_health_but_recover_does() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
                           static_cast<uint8_t>(dev.state()));
   TEST_ASSERT_EQUAL_UINT32(2000u, dev.lastErrorMs());
+}
+
+void test_probe_preserves_transport_status_except_address_nack() {
+  {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_TIMEOUT, "probe timeout", -41);
+    Status st = dev.probe();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-41, st.detail);
+    TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_BUS, "probe bus error", -42);
+    Status st = dev.probe();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-42, st.detail);
+    TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_NACK_DATA, "probe data NACK", -43);
+    Status st = dev.probe();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-43, st.detail);
+    TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  }
+
+  {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_NACK_ADDR, "probe address NACK", -44);
+    Status st = dev.probe();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_INT32(-44, st.detail);
+    TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  }
 }
 
 void test_probe_preserves_register_mismatch() {
@@ -1345,6 +1520,7 @@ int main() {
   RUN_TEST(test_command_constants);
   RUN_TEST(test_config_defaults);
   RUN_TEST(test_begin_rejects_invalid_config);
+  RUN_TEST(test_begin_preserves_transport_status_except_address_nack);
   RUN_TEST(test_begin_accepts_documented_and_alternate_address_ranges);
   RUN_TEST(test_begin_reads_and_caches_registers);
   RUN_TEST(test_begin_without_initial_writes_is_read_only);
@@ -1367,6 +1543,8 @@ int main() {
   RUN_TEST(test_direct_register_access_rejects_reserved);
   RUN_TEST(test_read_last_address);
   RUN_TEST(test_i2c_reset_and_restore_defaults);
+  RUN_TEST(test_i2c_reset_ok_from_degraded_does_not_mark_ready_without_device_read);
+  RUN_TEST(test_i2c_reset_ok_then_device_read_success_returns_ready);
   RUN_TEST(test_i2c_reset_reports_unsupported_without_callback);
   RUN_TEST(test_general_call_helpers);
   RUN_TEST(test_write_wiper_pre_mutation_failure_does_not_set_uncertainty);
@@ -1376,6 +1554,7 @@ int main() {
   RUN_TEST(test_general_call_mutate_then_fail_marks_uncertain);
   RUN_TEST(test_successful_readback_clears_uncertainty_only_after_all_unknown_verified);
   RUN_TEST(test_probe_does_not_update_health_but_recover_does);
+  RUN_TEST(test_probe_preserves_transport_status_except_address_nack);
   RUN_TEST(test_probe_preserves_register_mismatch);
   RUN_TEST(test_offline_threshold);
   RUN_TEST(test_offline_blocks_normal_operations_without_bus_io);

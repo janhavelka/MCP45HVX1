@@ -17,6 +17,16 @@ The core library never calls `Wire` directly. Applications provide:
 The example adapter in `examples/common/I2cTransport.h` maps `TwoWire` errors to
 the driver `Status` model.
 
+`Config` is copied into the driver, but callback pointers and
+`i2cUser`/`controlUser`/`timeUser` contexts are non-owning. They must remain
+valid for every driver call that can use them. Driver calls are synchronous,
+not internally locked, and not ISR-safe; applications must serialize access to
+shared drivers and buses externally.
+
+`MCP45HVX1` instances are non-copyable and non-movable. One instance should
+represent one physical device/bus binding because it owns health counters,
+volatile register-cache knowledge, and non-owning callback contexts.
+
 ## Initialization
 
 `begin()` validates configuration, reads Wiper 0 and TCON0 using the documented
@@ -35,6 +45,11 @@ intentional for the hardware design.
 TCON0 `0xFF` and Wiper 0 `0x7F` for 8-bit parts or `0x3F` for 7-bit parts.
 `resetI2cState()` calls the optional board reset callback and does not alter
 Wiper/TCON state.
+
+For baseline presence reads in `begin()`, an address NACK is reported as
+`DEVICE_NOT_FOUND` with numeric detail preserved. Timeout, bus-error,
+data-NACK, generic I2C, and register-format failures keep their original public
+status code.
 
 ## Register Access
 
@@ -90,11 +105,35 @@ Tracked public I2C operations update:
 - total failures/successes
 - READY/DEGRADED/OFFLINE state
 
-`probe()` uses the raw path and does not update health. `recover()` uses tracked
-reads so communication failures are visible in health counters.
+`probe()` uses the raw path and does not update health counters, Wiper/TCON
+cache, uncertainty, or READY/DEGRADED/OFFLINE state. Address NACK maps to
+`DEVICE_NOT_FOUND`; timeout, bus-error, data-NACK, generic I2C, and
+register-format failures keep their original public status code. The raw read
+may update address-pointer knowledge.
+
+`resetI2cState()` calls only the optional bus-reset callback. A successful
+callback clears address-pointer knowledge but does not prove device presence,
+clear hardware uncertainty, refresh Wiper/TCON cache, or mark a DEGRADED or
+OFFLINE driver READY. Reset callback failures are tracked as health failures
+when they are real transport/reset errors.
+
+`recover()` does not call `busReset`. It performs tracked Wiper then TCON reads,
+refreshes cache, clears uncertainty only for verified registers, and returns
+READY only after both reads succeed. If recovery starts OFFLINE and only
+partially succeeds, the OFFLINE latch is restored.
 
 Semantic readback failures, such as a non-zero read MSB when
 `requireReadMsbZero` is enabled, are also recorded as tracked health failures.
+
+## Hardware Uncertainty
+
+Failed state-changing Wiper, TCON, raw register, startup, or General Call
+writes can leave volatile analog state uncertain if the bus transaction may have
+reached the device before the host observed an error. In that case the driver
+preserves the original `Status`, marks affected cache entries unknown, and sets
+`hardwareStateUncertain` until readback verifies every affected volatile
+register. Validation failures before I2C access and address NACKs do not set
+uncertainty.
 
 ## General Call
 

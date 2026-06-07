@@ -110,9 +110,9 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
 ### Diagnostics
 
-- `Status probe()` - raw Wiper read without health-counter updates
-- `Status recover()` - tracked Wiper/TCON reads to refresh cache and health
-- `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback
+- `Status probe()` - raw Wiper read without health-counter or Wiper/TCON cache updates
+- `Status recover()` - tracked Wiper/TCON reads to refresh cache, clear verified uncertainty, and return READY only after both reads succeed
+- `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback without proving device READY
 - `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
 - `bool hardwareStateUncertain()` - true after an ambiguous state-changing write failure until readback verifies affected state
@@ -192,6 +192,11 @@ but preserves the runtime config and initialized transport state so
 `readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` can inspect the
 possibly changed volatile hardware state.
 
+For `begin()` and `probe()` presence checks, a definite address NACK is reported
+as `Err::DEVICE_NOT_FOUND` with the callback detail value preserved. Timeouts,
+bus errors, data NACKs, generic I2C errors, and register-format mismatches are
+returned with their original public status code.
+
 ## Configuration
 
 | Field | Default | Description |
@@ -215,21 +220,35 @@ possibly changed volatile hardware state.
 
 The core driver is synchronous and transport-agnostic. It does not allocate heap
 memory or own an Arduino `Wire` instance; callers inject I2C callbacks through
-`Config`. Calls are not internally locked, so share one driver instance from a
-single task/thread at a time or serialize access in the application.
+`Config`. Callback pointers and `i2cUser`/`controlUser`/`timeUser` contexts are
+non-owning and must outlive every driver call that can use them. Calls are not
+internally locked, so share one driver instance from a single task/thread at a
+time or serialize access in the application.
 
 The public API is not ISR-oriented. I2C transports, callbacks, and optional bus
 reset hooks are expected to run from normal task context where blocking I2C
 transactions and timeout handling are acceptable.
 
+`MCP45HVX1` objects are not copyable or movable. A driver instance owns runtime
+health counters, volatile register-cache knowledge, and non-owning callback
+contexts; create one instance per physical device/bus binding.
+
 Health tracking is latched at `DriverState::OFFLINE`: after the configured
 consecutive tracked-failure threshold is reached, normal public I2C operations
 return `Err::BUSY` with `Driver is offline; call recover()` and do not call the
 I2C transport. `probe()` may still perform a raw presence check without changing
-health counters. `resetI2cState()` may run the configured bus-reset callback but
-does not by itself mark the device recovered while already OFFLINE. Call
-`recover()` to perform tracked Wiper/TCON reads, refresh caches, and return to
-READY on success.
+health counters, Wiper/TCON cache state, or READY/DEGRADED/OFFLINE state; the
+raw read may update address-pointer knowledge. `resetI2cState()` may run the
+configured bus-reset callback and records reset failures, but a
+successful callback is not device proof: it does not clear uncertainty, refresh
+cache, or mark a DEGRADED/OFFLINE driver READY. Call `recover()` or perform a
+tracked device read to prove the device responds.
+
+`recover()` does not run the bus-reset callback. It reads Wiper first and TCON
+second using tracked transactions. Both reads must succeed before it returns OK
+and READY; readback clears hardware uncertainty only for the volatile registers
+that were verified. If recovery starts from OFFLINE and only partially succeeds,
+the OFFLINE latch is restored.
 
 Hardware uncertainty is separate from `DriverState`. A device can be READY while
 the analog state is still uncertain after an ambiguous failed Wiper/TCON or

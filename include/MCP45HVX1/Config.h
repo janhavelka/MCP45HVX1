@@ -71,7 +71,11 @@ enum class ResistanceOption : uint8_t {
 ///
 /// The core driver never accesses Arduino Wire directly. All bus operations go
 /// through the callbacks stored here so the same driver can be used from tests,
-/// Arduino examples, or another RTOS transport.
+/// Arduino examples, or another RTOS transport. Callback pointers and all user
+/// contexts are non-owning and must outlive the driver instance or every
+/// operation using this configuration. The core does not lock around callbacks;
+/// applications must serialize shared bus/driver access externally. Callbacks
+/// are expected to run from normal task/thread context, not an ISR.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
