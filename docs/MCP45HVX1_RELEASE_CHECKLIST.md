@@ -86,6 +86,7 @@ repository unless a release explicitly decides to ship them.
 | `DS80000649B` review | completed against actual silicon |
 | Affected/unknown silicon decision | isolated bus or shared-bus risk acceptance recorded |
 | General Call release decision | isolated-bus evidence or explicit risk acceptance |
+| CLI General Call warning parity | Arduino and ESP-IDF `gc arm` warnings reviewed |
 
 Treat Rev A1 through `1518NNN`, unreadable markings, or unknown silicon as
 affected until proven otherwise.

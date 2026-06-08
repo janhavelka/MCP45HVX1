@@ -19,6 +19,9 @@ Prompt: `05_espidf_cli_behavioral_parity_and_build_gate`
 - Read-only diagnostics such as `probe`, `recover`, `cfg`, `settings`, `detail`,
   `drv`, `health`, `state`, `read`, `dump`, `readwiper`, `readtcon`, and `last`
   reject unexpected extra arguments instead of silently ignoring them.
+- `gc arm`, `gc disarm`, `gc inc`, and `gc dec` now reject trailing arguments.
+  `gc arm` prints bus-wide, DS80000649B, and isolated-bus-evidence warnings
+  before enabling one broadcast command.
 
 ## Parser Changes
 
@@ -63,7 +66,8 @@ Prompt: `05_espidf_cli_behavioral_parity_and_build_gate`
   dependencies across the whole native IDF example tree.
 - It requires exact command dispatch, native IDF tokens, bounded parser helpers,
   functional color, real `selftest output` behavior, General Call native IDF
-  implementation tokens, and no stale docs claiming the IDF example is absent.
+  implementation/warning tokens, and no stale docs claiming the IDF example is
+  absent.
 - `tools/check_cli_contract.py` now records the current native General Call IDF
   tokens.
 
@@ -72,11 +76,12 @@ Prompt: `05_espidf_cli_behavioral_parity_and_build_gate`
 - `python tools/check_core_timing_guard.py` - passed.
 - `python tools/check_cli_contract.py` - passed.
 - `python tools/check_idf_example_contract.py` - passed.
-- `python tools/check_generated_artifacts.py` - passed.
+- `python tools/check_generated_artifacts.py` - passed after removing tracked
+  `tools/__pycache__/run_hil_mcp45hvx1.cpython-312.pyc`.
 - `python scripts/generate_version.py check` - passed.
-- `python -m platformio test -e native` - first attempt hit a transient local
-  `.pio/build/native` artifact-directory creation error; immediate rerun passed
-  55/55 tests.
+- `python -m platformio test -e native` - first attempt failed because
+  PlatformIO could not open `C:\Users\Honza\.platformio\platforms.lock`;
+  rerun with cache access passed 60/60 tests.
 - `python -m platformio run -e esp32s3dev` - passed.
 - `python -m platformio run -e esp32s2dev` - passed.
 - `python -m platformio pkg pack` - passed; generated

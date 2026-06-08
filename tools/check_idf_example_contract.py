@@ -293,6 +293,15 @@ def main() -> int:
         "I2C_DEVICE_ADDRESS_NOT_USED",
         "addressByte = 0x00U",
         "i2c_master_execute_defined_operations",
+        'printDanger("General Call armed for one broadcast command.',
+        "It affects every enabled device on the bus",
+        "DS80000649B: affected silicon has General Call decode anomalies",
+        "Output-changing General Call commands require isolated-bus evidence",
+        "General Call is broadcast; run 'gc arm' first.",
+        "Usage: gc arm",
+        "Usage: gc disarm",
+        "Usage: gc inc",
+        "Usage: gc dec",
     ):
         require_token(text, token, "ESP-IDF General Call implementation")
 

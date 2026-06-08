@@ -1239,35 +1239,59 @@ void handleGc(const char* args) {
   lowerAscii(sub);
   char* valueText = splitWhitespace(sub);
   if (strcmp(sub, "arm") == 0) {
+    if (!isBlankArg(valueText)) {
+      puts("Usage: gc arm");
+      gGcArmed = false;
+      return;
+    }
     gGcArmed = true;
-    puts("General Call armed for one command.");
+    printDanger("General Call armed for one broadcast command.");
+    printWarning("It affects every enabled device on the bus and cache will become uncertain.");
+    printWarning("DS80000649B: affected silicon has General Call decode anomalies.");
+    printWarning("Output-changing General Call commands require isolated-bus evidence.");
     return;
   }
   if (strcmp(sub, "disarm") == 0) {
     gGcArmed = false;
-    puts("General Call disarmed.");
+    if (isBlankArg(valueText)) {
+      puts("General Call disarmed.");
+    } else {
+      puts("Usage: gc disarm");
+    }
     return;
   }
   if (!gGcArmed) {
-    puts("General Call rejected; run 'gc arm' first.");
+    puts("General Call is broadcast; run 'gc arm' first.");
     return;
   }
   gGcArmed = false;
   MCP45HVX1::Status st = MCP45HVX1::Status::Ok();
   if (strcmp(sub, "inc") == 0) {
+    if (!isBlankArg(valueText)) {
+      puts("Usage: gc inc");
+      return;
+    }
+    printDanger("General Call broadcast may affect every enabled device on the bus.");
     st = gDev.generalCallIncrementWiper();
     printStatus("gc inc", st);
   } else if (strcmp(sub, "dec") == 0) {
+    if (!isBlankArg(valueText)) {
+      puts("Usage: gc dec");
+      return;
+    }
+    printDanger("General Call broadcast may affect every enabled device on the bus.");
     st = gDev.generalCallDecrementWiper();
     printStatus("gc dec", st);
   } else if (strcmp(sub, "wiper") == 0) {
     uint8_t v = 0;
+    printDanger("General Call broadcast may affect every enabled device on the bus.");
     st = parseWiperCodeArg(valueText, &v)
              ? gDev.generalCallWriteWiper(v)
              : MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "bad code");
     printStatus("gc wiper", st);
   } else if (strcmp(sub, "tcon") == 0) {
     uint8_t v = 0;
+    printDanger("General Call broadcast may affect every enabled device on the bus.");
     st = parseTconArg(valueText, &v)
              ? gDev.generalCallWriteTcon(v)
              : MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "bad value");

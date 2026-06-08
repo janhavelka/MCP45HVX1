@@ -1,5 +1,7 @@
 .pio
 hil_logs/
+__pycache__/
+*.pyc
 *.tar.gz
 *.tgz
 .vscode/.browse.c_cpp.db*

@@ -431,7 +431,9 @@ parse-to-byte casts, no-op color support, and selftest-output mismatches.
 The IDF CLI uses bounded command parsers before all byte-sized writes, has
 optional ANSI color via `color on|off`, reports uncertainty/cache-known fields
 in `state`, `drv`/`health`, and `cfg`, and implements `selftest output` as an
-explicit output-changing, state-restoring test.
+explicit output-changing, state-restoring test. `gc arm` prints bus-wide,
+DS80000649B, and isolated-bus-evidence warnings before enabling one broadcast
+General Call command.
 
 ## HIL Evidence Capture
 
