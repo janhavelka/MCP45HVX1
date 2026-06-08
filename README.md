@@ -1,7 +1,9 @@
 # MCP45HVX1 Driver Library
 
-Framework-neutral MCP45HVX1 high-voltage I2C digital potentiometer driver for
-ESP32 (Arduino/PlatformIO and ESP-IDF).
+Framework-neutral, production-oriented MCP45HVX1 high-voltage I2C digital
+potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). This hardening
+branch focuses on industry-readiness software behavior, documentation, tests,
+and evidence gates.
 
 Current release status: pre-production candidate pending hardware validation.
 Software tests and static guards do not prove analog accuracy, high-voltage
@@ -58,8 +60,11 @@ The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 sources or compatibility facades.
 
 Software validation status: command parity is checked by repo-local contract
-scripts. Hardware smoke tests are still pending until target devices are
-available, and no high-voltage validation is claimed without measurement logs.
+scripts. The pure ESP-IDF build is configured in CI; local `idf.py` may be
+absent on developer machines, so local IDF build success must not be claimed
+unless an actual `idf.py` log is recorded. Hardware smoke tests are still
+pending until target devices are available, and no high-voltage validation is
+claimed without measurement logs.
 
 ## Quick Start
 
@@ -330,6 +335,10 @@ or board-level loading.
 
 ## Examples
 
+The bundled examples are diagnostic bring-up tools. They are not production bus
+managers: production firmware must own bus locking, reset policy, timeout
+policy, rails, SHDN/WLAT pins, safe-load decisions, and any operator gating.
+
 ### 01_basic_bringup_cli
 
 Interactive serial CLI with commands for bus scan, begin/reconfigure,
@@ -461,6 +470,8 @@ Each run writes `hil_logs/mcp45hvx1_<timestamp>/` with `raw_serial.txt`,
 `commands.txt`, `summary.json`, `report.md`, and `operator_notes.md`.
 Hardware validation is not claimed unless the HIL runner was actually run and
 the resulting evidence bundle is attached to the release or validation record.
+The HIL runner is repository tooling and is excluded from normal PlatformIO
+package exports; use the full repository when capturing HIL evidence.
 
 ## Running Tests
 
@@ -470,7 +481,7 @@ framework; applications that consume this library through `lib_deps` do not need
 to add a separate `Wire` dependency.
 
 ```bash
-python tools/validate.py
+python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio test -e native
@@ -492,19 +503,24 @@ idf.py build
 include headers, source, examples, metadata, and current core docs. Large
 reference PDFs, extracted datasheet markdown, tests, tools, CI metadata, and
 local build output are intentionally excluded from normal packages to keep the
-install artifact focused and reproducible. The full reference corpus remains in
-the repository for audit and documentation work.
+install artifact focused and reproducible. HIL tooling is also repo-only. The
+full reference corpus and release-preparation tooling remain in the repository
+for audit, documentation, validation, and release work.
 
 ## Documentation
 
+- [Docs Index](docs/README.md)
 - [Assumptions](ASSUMPTIONS.md)
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
+- <a href="docs/MCP45HVX1_INDUSTRY_HARDENING_FINAL_REPORT.md">Industry Hardening Final Report</a>
 - <a href="docs/05_register_map.md">Register Map</a>
 - <a href="docs/register_reference.md">Driver Register Reference</a>
 - <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
 - <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
+- <a href="docs/MCP45HVX1_FINAL_DOCS_RELEASE_CLEANUP_REPORT.md">Final Docs Release Cleanup Report</a>
 - <a href="docs/MCP45HVX1_HIL_TOOLING_REPORT.md">HIL Tooling Report</a>
+- <a href="docs/MCP45HVX1_ESP_IDF_PARITY_REPORT.md">ESP-IDF Parity Report</a>
 - <a href="docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md">Device Model And Errata Report</a>
 - <a href="docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md">Docs Release Metadata Report</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)

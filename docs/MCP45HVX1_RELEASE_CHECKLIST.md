@@ -35,7 +35,7 @@ production-ready or industry-grade.
 
 | Gate | Command/evidence |
 |---|---|
-| HIL runner syntax | `python -m py_compile tools/run_hil_mcp45hvx1.py` |
+| Python tool syntax | `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` |
 | Core timing guard | `python tools/check_core_timing_guard.py` |
 | Arduino/CLI contract | `python tools/check_cli_contract.py` |
 | ESP-IDF example contract | `python tools/check_idf_example_contract.py` |
@@ -46,9 +46,12 @@ production-ready or industry-grade.
 | Arduino ESP32-S2 build | `python -m platformio run -e esp32s2dev` |
 | Pure ESP-IDF esp32s3 build | `idf.py -C examples/espidf_basic set-target esp32s3 build`, or CI log link |
 | Pure ESP-IDF esp32s2 build | `idf.py -C examples/espidf_basic set-target esp32s2 build`, or CI log link |
+| Remote CI run reviewed | `gh run list --limit 10` or equivalent workflow/log URL |
 
 Remote CI can be cited only when the workflow actually ran for the release
-commit. Local checks and CI checks are separate evidence.
+commit. Local checks and CI checks are separate evidence. The current workflow
+triggers on `main`, `v*` tags, and pull requests to `main`; direct hardening
+branch pushes are not remote CI evidence by themselves.
 
 ## Packaging
 
@@ -56,6 +59,7 @@ commit. Local checks and CI checks are separate evidence.
 |---|---|
 | Package pack | `python -m platformio pkg pack` passed |
 | Generated tarball removed | package archive removed before commit |
+| Generated archive ignore policy | `.gitignore` and guard cover `*.tar.gz`, `*.tgz`, and `*.zip` |
 | Export policy reviewed | `library.json` export section reviewed |
 | ESP-IDF file policy reviewed | `idf_component.yml` files/exclude section reviewed |
 | Package size accepted | packed archive size recorded |

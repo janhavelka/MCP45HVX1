@@ -2,45 +2,45 @@
 
 ## Unreleased
 
-- Documentation and package metadata now describe the library as a
-  pre-production candidate pending hardware validation rather than a
-  production-ready release.
-- Added authoritative API contract, hardware validation, and release checklist
-  docs for release gating, evidence capture, and package export scope.
-- `library.json` export rules now exclude large reference PDFs, extracted
-  datasheet markdown, tests, tools, and CI metadata from normal PlatformIO
-  package archives.
-- ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build
-  of the full bring-up CLI command contract.
-- ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
-- Core health timestamps now come only from injected `Config::nowMs`; framework
-  time sources live in examples/application glue.
-- `library.json` now declares both `arduino` and `espidf` framework support.
-- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino
-  CLI source, and native IDF entry point.
-- The ESP-IDF example adapter now sends General Call address `0x00` through
-  ESP-IDF defined I2C operations with manual address bytes instead of relying on
-  normal device-handle addressing for a reserved address.
-- `tools/check_idf_example_contract.py` validates the native ESP-IDF boundary,
-  required CMake dependencies, General Call CLI subcommands, and manual-address
-  General Call path.
-- The ESP-IDF CLI parity is checked through repo-local command contracts;
-  hardware validation remains pending until target hardware is available.
-- Latched `OFFLINE` behavior for normal public I2C operations. Once the health
-  threshold is reached, normal operations return `BUSY` with
-  `Driver is offline; call recover()` and do not touch the bus until
-  `recover()` succeeds.
-- Native coverage for the latched `OFFLINE` guard, explicit recovery path, and
-  static helper API usage.
-- Added GitHub Actions CI for ESP32-S3/ESP32-S2 builds, native tests, contract
-  checks, package validation, and version checks.
-- ESP32 example builds now pin pioarduino `platform-espressif32` 54.03.20 and
-  rely on the Arduino framework-provided `Wire` library instead of an explicit
-  `lib_deps = Wire` entry.
-- README documentation now covers thread/ISR expectations, the latched recovery
-  model, and the remaining hardware-validation caveats.
-- Failed explicit recovery attempts that begin from `OFFLINE` now reassert the
-  latch after any later recovery-step failure, using `_reassertOfflineLatch()`.
+- Documented the current status as a pre-production candidate pending hardware
+  validation; no production, hardware-validation, high-voltage, analog
+  accuracy, General Call safety, or release-readiness claim is made without
+  logged evidence.
+- Added hardware-uncertainty tracking for ambiguous failed Wiper/TCON/raw/
+  General Call state-changing writes, including cache invalidation, public
+  snapshot fields, and readback-only clearing.
+- Made optional `begin()` startup Wiper/TCON writes explicitly opt-in,
+  readback-first, visible after failure, and recoverable through normal
+  readback/recovery paths.
+- Clarified status, health, lifecycle, reset/probe/recover, callback lifetime,
+  non-ISR, threading, and deleted copy/move contracts.
+- Aligned device model and docs with datasheet-driven MCP45HV31/MCP45HV51
+  resolution/POR defaults, Wiper/TCON registers, TCON reserved bits, SHDN/WLAT
+  physical semantics, POR/BOR timing, and DS80000649B errata gates.
+- Completed native ESP-IDF CLI behavioral parity work: bounded command parsing,
+  functional `color on|off`, real `selftest output`, read-only `stress`,
+  state-restoring `stress_mix`, state/health/cfg parity, null-handle guards,
+  raw-write warnings, and General Call warning/argument parity.
+- Strengthened native tests, fault-injection coverage, generated-artifact
+  checks, Arduino/ESP-IDF CLI contract guards, stale-placeholder guards, and
+  ESP-IDF native-boundary checks.
+- Added HIL evidence tooling in `tools/run_hil_mcp45hvx1.py` with safe
+  read-only defaults, explicit output-changing opt-ins, General Call isolated
+  bus gating, SHDN/WLAT operator prompts, restore checks, and attachable
+  evidence bundles. No hardware HIL transcript is bundled.
+- Added GitHub Actions coverage for ESP32-S3/ESP32-S2 PlatformIO builds, native
+  tests, guard scripts, package validation, version checks, and pure ESP-IDF
+  `esp32s2`/`esp32s3` matrix builds. Remote CI status must still be checked
+  from an actual run before it is cited.
+- Added authoritative docs index, API contract, hardware validation template,
+  release checklist, ESP-IDF parity report, final hardening report, and final
+  docs/release cleanup report.
+- Updated package/export rules so normal packages include headers, source,
+  examples, metadata, and selected current docs while excluding generated
+  archives, local build output, tests, tools, prompts, CI metadata, large PDFs,
+  and extracted reference markdown.
+- Kept release tag creation pending explicit approval and release-checklist
+  evidence.
 
 ## 1.0.0
 

@@ -1,8 +1,15 @@
 # MCP45HVX1 Tailored Industry-Readiness Fix Prompts
 
-These prompts are tailored directly from `docs/MCP45HVX1_PRODUCTION_READINESS_EXPLORATION_REPORT.md`.
+These prompts are tailored directly from the original MCP45HVX1 production
+readiness exploration audit.
 
-Send them to the coding agent **one by one, in order**. Each prompt instructs the agent to:
+> Archive note: this file records the prompt sequence used for the completed
+> hardening branch. Do not treat the prompts below as active work items unless a
+> regression is found. Current closure status lives in
+> `docs/MCP45HVX1_INDUSTRY_HARDENING_FINAL_REPORT.md`.
+
+The prompts were intended to be sent to the coding agent **one by one, in
+order**. Each prompt instructed the agent to:
 - complete only that chunk,
 - spawn focused subagents,
 - implement the requested changes,

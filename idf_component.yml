@@ -12,6 +12,8 @@ files:
   exclude:
     - ".github/**/*"
     - ".pio/**/*"
+    - "**/__pycache__/**/*"
+    - "**/*.pyc"
     - "test/**/*"
     - "tests/**/*"
     - "tools/**/*"

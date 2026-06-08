@@ -98,4 +98,10 @@ the local environment.
 
 ## Software Checks
 
-Validation results are recorded after the final Prompt 08 validation run.
+The original Prompt 08 report did not embed a command-by-command validation
+table. Current software validation for the final merge-preparation pass is
+recorded in `docs/MCP45HVX1_FINAL_DOCS_RELEASE_CLEANUP_REPORT.md`.
+
+Hardware HIL remains separate from software validation. No serial-port HIL run,
+safe-load run, output-changing run, SHDN/WLAT observation, or General Call
+isolated-bus evidence bundle is bundled with this report.
