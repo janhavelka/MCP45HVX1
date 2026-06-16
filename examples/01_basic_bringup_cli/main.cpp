@@ -495,6 +495,7 @@ MCP45HVX1::Config makeDefaultConfig() {
   cfg.nowMs = exampleNowMs;
   cfg.resolution = MCP45HVX1::Resolution::Bits8;
   cfg.resistance = MCP45HVX1::ResistanceOption::R10K;
+  cfg.allowGeneralCall = true;  // Diagnostic CLI has its own one-shot `gc arm` operator gate.
   return cfg;
 }
 
@@ -818,6 +819,10 @@ void printConfigSnapshot() {
   LOG_SERIAL.printf("  Alternate address range enabled: %s%s%s\n",
                     s.config.allowAlternateAddressRange ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
                     s.config.allowAlternateAddressRange ? "yes" : "no",
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  General Call core opt-in: %s%s%s\n",
+                    s.config.allowGeneralCall ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    s.config.allowGeneralCall ? "yes" : "no",
                     LOG_COLOR_RESET);
   LOG_SERIAL.printf("  Variant: %s (configured, not auto-detected)\n",
                     variantName(info.resolution));

@@ -262,6 +262,11 @@ def main() -> int:
     if 'extern "C" void app_main(void)' not in idf_text:
         fail("ESP-IDF entry point must define app_main()")
 
+    for source, label in ((text, "Arduino CLI"), (idf_text, "ESP-IDF CLI")):
+        require_token(source, "allowGeneralCall = true", f"{label} General Call core opt-in")
+    require_token(text, "General Call core opt-in", "Arduino CLI General Call config output")
+    require_token(idf_text, "general_call_allowed=", "ESP-IDF CLI General Call config output")
+
     for token in (
         "uncertain=",
         "hardwareStateUncertain",

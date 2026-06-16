@@ -280,6 +280,8 @@ def main() -> int:
     for token in (
         "gBus.bus == nullptr",
         "I2C bus not initialized",
+        "allowGeneralCall = true",
+        "general_call_allowed=",
         "gOutputStateUncertain",
         "cache_known wiper=",
         "last_status=",

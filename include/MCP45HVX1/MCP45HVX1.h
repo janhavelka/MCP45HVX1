@@ -409,6 +409,7 @@ public:
   /// Read both implemented registers in sequence.
   /// Register readback proves volatile register contents only. It does not prove
   /// physical analog movement when WLAT, SHDN, or external circuitry overrides output.
+  /// The caller's snapshot is updated only after both reads succeed.
   /// @param snapshot Receives Wiper 0 and TCON0 values.
   /// @return Status::Ok() only if both reads succeed.
   Status readSnapshot(RegisterSnapshot& snapshot);
@@ -452,23 +453,31 @@ public:
   // =========================================================================
 
   /// Broadcast a Wiper 0 write using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @param code Raw wiper code to broadcast.
   /// @return Status::Ok() if the broadcast write was ACKed by the bus.
   Status generalCallWriteWiper(uint8_t code);
 
   /// Broadcast a TCON0 write using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local TCON cache is marked unknown because ACK is not device-specific.
   /// @param value Raw TCON0 value; reserved bits are sanitized before broadcast.
   /// @return Status::Ok() if the broadcast write was ACKed by the bus.
   Status generalCallWriteTcon(uint8_t value);
 
   /// Broadcast a Wiper 0 increment using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @return Status::Ok() if the broadcast command was ACKed by the bus.
   Status generalCallIncrementWiper();
 
   /// Broadcast a Wiper 0 decrement using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @return Status::Ok() if the broadcast command was ACKed by the bus.
   Status generalCallDecrementWiper();

@@ -475,11 +475,17 @@ Status MCP45HVX1::readTerminalStatus(TerminalStatus& status) {
 }
 
 Status MCP45HVX1::readSnapshot(RegisterSnapshot& snapshot) {
-  Status st = readWiper(snapshot.wiper);
+  RegisterSnapshot next;
+  Status st = readWiper(next.wiper);
   if (!st.ok()) {
     return st;
   }
-  return readTcon(snapshot.tcon);
+  st = readTcon(next.tcon);
+  if (!st.ok()) {
+    return st;
+  }
+  snapshot = next;
+  return Status::Ok();
 }
 
 // ===========================================================================
@@ -838,6 +844,10 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
   }
   if (_driverState == DriverState::OFFLINE) {
     return _offlineStatus();
+  }
+  if (!_config.allowGeneralCall) {
+    return Status::Error(Err::UNSUPPORTED,
+                         "General Call disabled by Config::allowGeneralCall");
   }
 
   uint8_t payload[2] = {commandByte, 0};

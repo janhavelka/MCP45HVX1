@@ -94,6 +94,7 @@ struct Config {
   Resolution resolution = Resolution::Bits8; ///< Device variant, MCP45HV51 by default
   ResistanceOption resistance = ResistanceOption::R10K; ///< Nominal RAB option for helper math
   bool allowAlternateAddressRange = false; ///< Allow disputed 0x5C-0x5F range for hardware checks
+  bool allowGeneralCall = false;       ///< Explicit opt-in for unsafe broadcast General Call helpers
 
   // === Optional Initialization Writes ===
   bool writeInitialWiper = false;        ///< Output-changing Wiper write during begin() when true

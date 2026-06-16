@@ -693,6 +693,7 @@ void beginDriver() {
   gCfg.busReset = resetBus;
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
+  gCfg.allowGeneralCall = true;  // Diagnostic CLI has its own one-shot `gc arm` operator gate.
   const MCP45HVX1::Status st = gDev.begin(gCfg);
   printStatus("begin", st);
   if (st.ok()) {
@@ -839,9 +840,10 @@ void printConfigSnapshot() {
   MCP45HVX1::SettingsSnapshot s{};
   (void)gDev.getSettings(s);
   printInfo();
-  printf("timeout_ms=%lu alternate_allowed=%d require_por=%d require_msb_zero=%d color=%d verbose=%d\n",
+  printf("timeout_ms=%lu alternate_allowed=%d general_call_allowed=%d require_por=%d require_msb_zero=%d color=%d verbose=%d\n",
          static_cast<unsigned long>(s.config.i2cTimeoutMs),
          s.config.allowAlternateAddressRange ? 1 : 0,
+         s.config.allowGeneralCall ? 1 : 0,
          s.config.requirePowerOnDefaults ? 1 : 0,
          s.config.requireReadMsbZero ? 1 : 0,
          styleIsEnabled() ? 1 : 0,

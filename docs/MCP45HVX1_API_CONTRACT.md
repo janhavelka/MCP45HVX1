@@ -118,9 +118,16 @@ the original error and preserves enough runtime state for `readWiper()`,
 
 Raw writes and General Call helpers are output-changing. General Call frames are
 broadcast and not device-specific; success does not prove the local device was
-the only responder. Production firmware must require isolated-bus evidence or a
-documented shared-bus risk acceptance before enabling output-changing General
-Call use.
+the only responder. The core General Call helpers are disabled unless
+`Config::allowGeneralCall` is explicitly true. When disabled, they return
+`UNSUPPORTED` without issuing bus traffic or changing cache/uncertainty state.
+Production firmware must require isolated-bus evidence or a documented
+shared-bus risk acceptance before enabling output-changing General Call use.
+
+The interactive Arduino and ESP-IDF diagnostic examples opt into this core flag
+because their CLI layer provides an additional one-shot `gc arm` gate and
+operator warnings. Application bus managers should make their own explicit
+policy decision rather than inheriting that example policy blindly.
 
 ## High-Voltage Safety
 

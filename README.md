@@ -179,10 +179,11 @@ match a named preset. It is a decoded state, not a valid argument to
 - `Status generalCallDecrementWiper()`
 
 The datasheet references a `GCEN` bit but the extracted register location is not
-documented. This library sends only the documented General Call frames. Because
-General Call ACKs are broadcast and not device-specific, successful General Call
-helpers mark the affected local cache entry unknown; call `readSnapshot()` to
-verify local state afterward.
+documented. This library sends only the documented General Call frames, and the
+core helpers are disabled unless `Config::allowGeneralCall` is explicitly true.
+Because General Call ACKs are broadcast and not device-specific, successful
+General Call helpers mark the affected local cache entry unknown; call
+`readSnapshot()` to verify local state afterward.
 
 Production firmware must treat General Call as a release-gated feature. Review
 `DS80000649B` and any newer errata against the actual package marking/date code
@@ -190,6 +191,11 @@ before release. Output-changing General Call commands require isolated-bus
 evidence, or a documented risk acceptance for affected or unknown silicon.
 Shared-bus deployments must not claim General Call safety without logged
 evidence and signoff.
+
+The Arduino and ESP-IDF diagnostic CLIs opt into the core General Call helpers
+so their `gc arm` command can remain functional. That opt-in is not a
+production bus-manager policy; it is paired with one-shot arming, warnings, and
+evidence requirements in the examples.
 
 ## Uncertain Hardware State
 
@@ -233,6 +239,7 @@ returned with their original public status code.
 | `resolution` | `Bits8` | `Bits8` for MCP45HV51, `Bits7` for MCP45HV31 |
 | `resistance` | `R10K` | Nominal RAB option for helper math |
 | `allowAlternateAddressRange` | `false` | Opt-in disputed `0x5C-0x5F` address range |
+| `allowGeneralCall` | `false` | Explicit opt-in for unsafe broadcast General Call helpers |
 | `i2cTimeoutMs` | `50` | Transport timeout |
 | `busReset` | `nullptr` | Optional board callback for I2C bus/software reset |
 | `controlUser` | `nullptr` | Context pointer for `busReset` |

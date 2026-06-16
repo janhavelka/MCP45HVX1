@@ -25,6 +25,7 @@ remain pending until logged evidence exists.
 |---|---|
 | [`MCP45HVX1_STATUS_HEALTH_LIFECYCLE_REPORT.md`](MCP45HVX1_STATUS_HEALTH_LIFECYCLE_REPORT.md) | Status fidelity, health, reset/probe/recover semantics, and copy/move policy. |
 | [`MCP45HVX1_TESTS_FAULT_GUARDS_REPORT.md`](MCP45HVX1_TESTS_FAULT_GUARDS_REPORT.md) | Native tests, fault coverage, guard scripts, and local software-validation status. |
+| [`MCP45HVX1_I2C_LIBRARY_HARDENING_REPORT.md`](MCP45HVX1_I2C_LIBRARY_HARDENING_REPORT.md) | General Call opt-in guard, raw-operation classification, dirty/cache uncertainty, and TunnelMonitor fit. |
 | [`MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md`](MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md) | Documentation, release wording, metadata, and package export cleanup history. |
 | [`MCP45HVX1_HIL_TOOLING_REPORT.md`](MCP45HVX1_HIL_TOOLING_REPORT.md) | HIL runner behavior and evidence bundle format. Hardware HIL was not run in that prompt. |
 | [`IDF_PORT.md`](IDF_PORT.md) and [`IDF_PORT_IMPLEMENTATION.md`](IDF_PORT_IMPLEMENTATION.md) | ESP-IDF component and native example notes. |

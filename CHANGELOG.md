@@ -21,6 +21,9 @@
   functional `color on|off`, real `selftest output`, read-only `stress`,
   state-restoring `stress_mix`, state/health/cfg parity, null-handle guards,
   raw-write warnings, and General Call warning/argument parity.
+- Gated core General Call helpers behind explicit `Config::allowGeneralCall`
+  opt-in while keeping diagnostic CLI General Call commands behind their
+  existing operator arming and warnings.
 - Strengthened native tests, fault-injection coverage, generated-artifact
   checks, Arduino/ESP-IDF CLI contract guards, stale-placeholder guards, and
   ESP-IDF native-boundary checks.

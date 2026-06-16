@@ -51,6 +51,8 @@ available source notes.
 | `0x84` | `generalCallIncrementWiper()` | None |
 | `0x88` | `generalCallDecrementWiper()` | None |
 
+General Call helpers require `Config::allowGeneralCall = true`. When the flag
+is false, helpers return `UNSUPPORTED` without bus traffic or cache changes.
 Successful General Call helpers mark the affected local cache entry unknown
 because an ACK is broadcast and not device-specific.
 If a General Call helper returns an ambiguous transport failure after the bus

@@ -309,6 +309,12 @@ Config makeConfig(FakeBus& bus) {
   return cfg;
 }
 
+Config makeGeneralCallConfig(FakeBus& bus) {
+  Config cfg = makeConfig(bus);
+  cfg.allowGeneralCall = true;
+  return cfg;
+}
+
 }  // namespace
 
 void setUp() {
@@ -348,6 +354,7 @@ void test_config_defaults() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ResistanceOption::R10K),
                           static_cast<uint8_t>(cfg.resistance));
   TEST_ASSERT_FALSE(cfg.allowAlternateAddressRange);
+  TEST_ASSERT_FALSE(cfg.allowGeneralCall);
   TEST_ASSERT_FALSE(cfg.writeInitialWiper);
   TEST_ASSERT_FALSE(cfg.writeInitialTcon);
   TEST_ASSERT_FALSE(cfg.requirePowerOnDefaults);
@@ -451,6 +458,33 @@ void test_begin_reads_and_caches_registers() {
   const SettingsSnapshot byValue = dev.getSettings();
   TEST_ASSERT_EQUAL_HEX8(s.cachedWiper, byValue.cachedWiper);
   TEST_ASSERT_EQUAL_HEX8(s.cachedTcon, byValue.cachedTcon);
+}
+
+void test_read_snapshot_does_not_partially_overwrite_output_on_failure() {
+  FakeBus bus;
+  bus.wiper = 0x42;
+  bus.tcon = 0xFB;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  RegisterSnapshot snapshot{0xAA, 0x55};
+  bus.wiper = 0x11;
+  bus.tcon = 0xF7;
+  bus.failReadCall = bus.readCalls + 2U;
+  bus.readError = Status::Error(Err::I2C_BUS, "snapshot TCON read failed", -81);
+
+  Status st = dev.readSnapshot(snapshot);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_INT32(-81, st.detail);
+  TEST_ASSERT_EQUAL_HEX8(0xAA, snapshot.wiper);
+  TEST_ASSERT_EQUAL_HEX8(0x55, snapshot.tcon);
+
+  SettingsSnapshot settings = dev.getSettings();
+  TEST_ASSERT_TRUE(settings.cachedWiperKnown);
+  TEST_ASSERT_EQUAL_HEX8(0x11, settings.cachedWiper);
+  TEST_ASSERT_TRUE(settings.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, settings.cachedTcon);
 }
 
 void test_begin_preserves_transport_status_except_address_nack() {
@@ -1104,7 +1138,7 @@ void test_i2c_reset_reports_unsupported_without_callback() {
 void test_general_call_helpers() {
   FakeBus bus;
   Driver dev;
-  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.begin(makeGeneralCallConfig(bus)).ok());
 
   TEST_ASSERT_TRUE(dev.generalCallWriteWiper(0x44).ok());
   TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
@@ -1125,9 +1159,41 @@ void test_general_call_helpers() {
 
   bus.resolution = Resolution::Bits7;
   Driver dev7;
-  TEST_ASSERT_TRUE(dev7.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev7.begin(makeGeneralCallConfig(bus)).ok());
   Status st = dev7.generalCallWriteWiper(0x80);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+}
+
+void test_general_call_disabled_by_default_without_bus_io() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t generalCallsBefore = bus.generalCallWrites;
+
+  Status st = dev.generalCallWriteWiper(0x44);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_STRING("General Call disabled by Config::allowGeneralCall", st.msg);
+
+  st = dev.generalCallWriteTcon(0x07);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.generalCallIncrementWiper();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.generalCallDecrementWiper();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(generalCallsBefore, bus.generalCallWrites);
+  TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_TRUE(dev.getSettings().cachedTconKnown);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
 }
 
 void test_i2c_reset_ok_from_degraded_does_not_mark_ready_without_device_read() {
@@ -1312,7 +1378,7 @@ void test_increment_decrement_partial_failure_marks_uncertain() {
 void test_general_call_mutate_then_fail_marks_uncertain() {
   FakeBus bus;
   Driver dev;
-  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.begin(makeGeneralCallConfig(bus)).ok());
 
   bus.writeErrorAfterMutationRemaining = 1;
   bus.writeError = Status::Error(Err::I2C_BUS, "general call failed after mutation", -15);
@@ -1912,6 +1978,7 @@ int main() {
   RUN_TEST(test_begin_preserves_transport_status_except_address_nack);
   RUN_TEST(test_begin_address_matrix);
   RUN_TEST(test_begin_reads_and_caches_registers);
+  RUN_TEST(test_read_snapshot_does_not_partially_overwrite_output_on_failure);
   RUN_TEST(test_begin_without_initial_writes_is_read_only);
   RUN_TEST(test_device_info_and_resistance_helpers);
   RUN_TEST(test_silicon_errata_info);
@@ -1938,6 +2005,7 @@ int main() {
   RUN_TEST(test_i2c_reset_ok_then_device_read_success_returns_ready);
   RUN_TEST(test_i2c_reset_reports_unsupported_without_callback);
   RUN_TEST(test_general_call_helpers);
+  RUN_TEST(test_general_call_disabled_by_default_without_bus_io);
   RUN_TEST(test_write_wiper_pre_mutation_failure_does_not_set_uncertainty);
   RUN_TEST(test_write_wiper_mutate_then_fail_marks_uncertain);
   RUN_TEST(test_write_tcon_mutate_then_fail_marks_uncertain);
