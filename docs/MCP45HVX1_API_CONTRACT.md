@@ -114,6 +114,42 @@ the original error and preserves enough runtime state for `readWiper()`,
 - If recovery starts from OFFLINE and later fails, the OFFLINE latch is
   restored.
 
+## Poll-Chunked Jobs
+
+The core exposes an explicit job API for applications that need bounded I2C
+work per owner-task poll:
+
+- `startSetWiperJob(code)`
+- `startReadSnapshotJob()`
+- `startSetTerminalJob(terminal, enabled)`
+- `startIncrementWiperJob(steps)`
+- `startDecrementWiperJob(steps)`
+- `startRecoverJob()`
+- `pollJob(nowMs, maxInstructions)`
+- `getJobSnapshot()`
+
+One register read or command-write chunk is one instruction. Snapshot jobs read
+Wiper and TCON as separate instructions. Terminal jobs expose the TCON
+read-modify-write sequence as separate read and write instructions, or complete
+after the read when the requested bit already matches. Wiper step jobs split
+multi-step operations into bounded command chunks and run at most one chunk per
+poll. A direct Wiper set job is a single output-changing instruction.
+
+While a job is active, other bus-touching public APIs return `Err::BUSY` without
+issuing I2C traffic. `JobSnapshot` reports job type, active state,
+output-changing classification, planned and completed instructions, the last
+poll's attempted instruction count, final status, and completed readback
+registers for snapshot/recover jobs.
+
+Ambiguous output-changing job failures preserve the original failing `Status`,
+mark affected cache entries unknown, and set hardware uncertainty using the
+same rules as synchronous writes. Read-side failures stop the job at the first
+failing instruction and do not mark hardware uncertainty by themselves.
+
+`startRecoverJob()` is the only job accepted while OFFLINE. When it starts from
+OFFLINE, the OFFLINE latch remains asserted after the first successful Wiper
+read and clears only after the second TCON read succeeds.
+
 ## Raw Register And General Call Warnings
 
 Raw writes and General Call helpers are output-changing. General Call frames are

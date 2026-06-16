@@ -43,6 +43,30 @@ struct RegisterSnapshot {
   uint8_t tcon = 0;  ///< Volatile TCON0 register
 };
 
+/// Active or most recently completed poll-job type.
+enum class JobType : uint8_t {
+  None,            ///< No job has been started.
+  SetWiper,        ///< One-instruction raw Wiper write.
+  ReadSnapshot,    ///< Chunked Wiper then TCON readback.
+  SetTerminal,     ///< Chunked TCON read-modify-write terminal helper.
+  IncrementWiper,  ///< Chunked Wiper increment command sequence.
+  DecrementWiper,  ///< Chunked Wiper decrement command sequence.
+  Recover          ///< Chunked Wiper/TCON recovery readback.
+};
+
+/// Snapshot of the active or most recently completed poll job.
+struct JobSnapshot {
+  JobType type = JobType::None; ///< Current or last job type.
+  bool active = false;          ///< true while pollJob() still has work to do.
+  bool outputChanging = false;  ///< true when the job can change Wiper/TCON state.
+  uint8_t instructionsCompleted = 0; ///< Successfully acknowledged instructions.
+  uint8_t instructionsPlanned = 0;   ///< Planned register-read or command-write instructions.
+  uint8_t lastPollInstructions = 0;  ///< I2C instructions attempted by the last pollJob().
+  Status status = Status::Ok();      ///< Last job status.
+  RegisterSnapshot registers;        ///< Completed readback result for snapshot/recover jobs.
+  bool registersValid = false;       ///< true when registers contains a completed readback.
+};
+
 /// Decoded terminal-control register fields.
 struct TerminalStatus {
   bool softwareShutdown = false; ///< true when TCON R0HW=0; does not report SHDN pin
@@ -148,6 +172,61 @@ public:
 
   /// Shutdown the driver object. Does not modify the analog terminal state.
   void end();
+
+  // =========================================================================
+  // Poll-Chunked Jobs
+  // =========================================================================
+
+  /// Start a one-instruction raw Wiper write job.
+  /// pollJob() executes at most one instruction for this output-changing job.
+  /// @param code New raw wiper code.
+  /// @return Status::Ok() when the job is accepted.
+  Status startSetWiperJob(uint8_t code);
+
+  /// Start a chunked readback of Wiper then TCON.
+  /// @return Status::Ok() when the job is accepted.
+  Status startReadSnapshotJob();
+
+  /// Start a chunked terminal read-modify-write helper.
+  /// @param terminal Terminal selector.
+  /// @param enabled true to connect the terminal switch, false to open it.
+  /// @return Status::Ok() when the job is accepted.
+  Status startSetTerminalJob(Terminal terminal, bool enabled);
+
+  /// Start a chunked Wiper increment sequence.
+  /// @param steps Number of increment commands to send; zero is a no-op.
+  /// @return Status::Ok() when the job is accepted or no-op zero steps are requested.
+  Status startIncrementWiperJob(uint8_t steps = 1);
+
+  /// Start a chunked Wiper decrement sequence.
+  /// @param steps Number of decrement commands to send; zero is a no-op.
+  /// @return Status::Ok() when the job is accepted or no-op zero steps are requested.
+  Status startDecrementWiperJob(uint8_t steps = 1);
+
+  /// Start a chunked recovery readback job. This is allowed while OFFLINE.
+  /// @return Status::Ok() when the job is accepted.
+  Status startRecoverJob();
+
+  /// Execute up to maxInstructions I2C instructions from the active job.
+  ///
+  /// A register read or a command write chunk is one instruction. Direct
+  /// output-changing Wiper and Wiper step jobs execute at most one instruction
+  /// per poll even when maxInstructions is larger.
+  /// @param nowMs Current monotonic time in milliseconds; reserved for caller scheduling.
+  /// @param maxInstructions Maximum instructions to attempt in this poll.
+  /// @return IN_PROGRESS while work remains, otherwise the final job status.
+  Status pollJob(uint32_t nowMs, uint8_t maxInstructions);
+
+  /// @return Active or most recently completed job snapshot.
+  JobSnapshot getJobSnapshot() const { return _job.snapshot; }
+
+  /// Copy active or most recently completed job snapshot.
+  /// @param out Receives the job snapshot.
+  /// @return Status::Ok().
+  Status getJobSnapshot(JobSnapshot& out) const;
+
+  /// @return true while a poll job is active.
+  bool jobActive() const { return _job.snapshot.active; }
 
   // =========================================================================
   // Diagnostics
@@ -501,6 +580,28 @@ private:
   Status _sendWiperStepCommand(cmd::Command command, uint8_t steps);
   Status _generalCallWrite(uint8_t commandByte, const uint8_t* data, size_t len);
 
+  struct ActiveJob {
+    JobSnapshot snapshot;
+    Terminal terminal = Terminal::A;
+    bool terminalEnabled = false;
+    uint8_t target = 0;
+    uint8_t temp = 0;
+    uint8_t phase = 0;
+    uint8_t remainingSteps = 0;
+    cmd::Command stepCommand = cmd::Command::Increment;
+    bool recoverStartedOffline = false;
+  };
+
+  // Poll-job helpers
+  Status _startJob(JobType type, bool outputChanging, uint8_t instructionsPlanned,
+                   bool allowOffline = false);
+  Status _startStepJob(JobType type, cmd::Command command, uint8_t steps);
+  Status _pollJobOneInstruction();
+  bool _jobRunsSingleInstructionPerPoll() const;
+  void _completeJob(const Status& st);
+  void _resetJob();
+  Status _jobBusyStatus() const;
+
   // Validation and state helpers
   static bool _isValidAddress(uint8_t address);
   static bool _isPrimaryAddress(uint8_t address);
@@ -547,6 +648,8 @@ private:
   bool _tconReadbackRequiredForUncertainty = false;
   bool _addressPointerKnown = true;
   uint8_t _addressPointer = cmd::REG_WIPER0;
+
+  ActiveJob _job;
 };
 
 }  // namespace MCP45HVX1

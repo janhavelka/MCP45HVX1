@@ -94,11 +94,12 @@ reading all affected volatile state, is required before uncertainty clears.
 
 The core remains callback-only and does not own `Wire`, ESP-IDF I2C handles,
 GPIO pins, locks, tasks, polling loops, or timing policy. TunnelMonitor can keep
-I2C ownership behind its `I2cTask` and call the synchronous core operations from
-that owner.
+I2C ownership behind its `I2cTask` and call either the synchronous core
+operations or the explicit poll-chunked jobs from that owner.
 
-The remaining TunnelMonitor-specific bounded-poll work belongs to the companion
-poll-chunking prompt.
+The companion poll-chunking prompt added bounded job APIs for Wiper writes,
+snapshot readback, terminal read-modify-write helpers, Wiper step chunks, and
+recovery readback. See `MCP45HVX1_POLL_CHUNKING_REPORT.md`.
 
 ## Tests
 
@@ -108,6 +109,7 @@ Native tests cover:
 - explicit General Call opt-in behavior;
 - `readSnapshot()` all-or-nothing caller output assignment on second-read
   failure;
+- poll-chunked job instruction budgets and failure-stop behavior;
 - ambiguous Wiper/TCON/raw/General Call write uncertainty;
 - offline latch blocking normal operations without extra bus I/O;
 - explicit `recover()` path out of OFFLINE.

@@ -43,6 +43,7 @@ Status MCP45HVX1::begin(const Config& config) {
   _clearHardwareStateUncertainty();
   _addressPointerKnown = true;
   _addressPointer = cmd::REG_WIPER0;
+  _resetJob();
 
   auto resetAfterFailedBegin = [this](Status failure) -> Status {
     _config = Config{};
@@ -58,6 +59,7 @@ Status MCP45HVX1::begin(const Config& config) {
     _clearHardwareStateUncertainty();
     _addressPointerKnown = true;
     _addressPointer = cmd::REG_WIPER0;
+    _resetJob();
     return failure;
   };
 
@@ -151,6 +153,109 @@ void MCP45HVX1::end() {
   _clearHardwareStateUncertainty();
   _addressPointerKnown = true;
   _addressPointer = cmd::REG_WIPER0;
+  _resetJob();
+}
+
+// ===========================================================================
+// Poll-Chunked Jobs
+// ===========================================================================
+
+Status MCP45HVX1::startSetWiperJob(uint8_t code) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (!_isValidWiperCode(code, _config.resolution)) {
+    return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", code);
+  }
+
+  Status st = _startJob(JobType::SetWiper, true, 1);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.target = code;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::startReadSnapshotJob() {
+  return _startJob(JobType::ReadSnapshot, false, 2);
+}
+
+Status MCP45HVX1::startSetTerminalJob(Terminal terminal, bool enabled) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  const uint8_t mask = _terminalMask(terminal);
+  if (mask == INVALID_TERMINAL_MASK) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid terminal");
+  }
+
+  Status st = _startJob(JobType::SetTerminal, true, 2);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.terminal = terminal;
+  _job.terminalEnabled = enabled;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::startIncrementWiperJob(uint8_t steps) {
+  return _startStepJob(JobType::IncrementWiper, cmd::Command::Increment, steps);
+}
+
+Status MCP45HVX1::startDecrementWiperJob(uint8_t steps) {
+  return _startStepJob(JobType::DecrementWiper, cmd::Command::Decrement, steps);
+}
+
+Status MCP45HVX1::startRecoverJob() {
+  Status st = _startJob(JobType::Recover, false, 2, true);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.recoverStartedOffline = _driverState == DriverState::OFFLINE;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::pollJob(uint32_t nowMs, uint8_t maxInstructions) {
+  (void)nowMs;
+
+  if (!_job.snapshot.active) {
+    return _job.snapshot.status;
+  }
+
+  _job.snapshot.lastPollInstructions = 0;
+  if (maxInstructions == 0) {
+    _job.snapshot.status = Status::InProgress("Job in progress");
+    return _job.snapshot.status;
+  }
+
+  const uint8_t budget = _jobRunsSingleInstructionPerPoll() ? 1 : maxInstructions;
+  while (_job.snapshot.active && _job.snapshot.lastPollInstructions < budget) {
+    Status st = _pollJobOneInstruction();
+    _job.snapshot.lastPollInstructions++;
+    if (!st.ok()) {
+      _completeJob(st);
+      break;
+    }
+    if (_job.snapshot.instructionsCompleted < std::numeric_limits<uint8_t>::max()) {
+      _job.snapshot.instructionsCompleted++;
+    }
+  }
+
+  if (_job.snapshot.active) {
+    _job.snapshot.status = Status::InProgress("Job in progress");
+  }
+  return _job.snapshot.status;
+}
+
+Status MCP45HVX1::getJobSnapshot(JobSnapshot& out) const {
+  out = _job.snapshot;
+  return Status::Ok();
 }
 
 SettingsSnapshot MCP45HVX1::getSettings() const {
@@ -202,6 +307,9 @@ Status MCP45HVX1::probe() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   uint8_t value = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, value);
@@ -214,6 +322,9 @@ Status MCP45HVX1::probe() {
 Status MCP45HVX1::recover() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
 
   const bool startedOffline = _driverState == DriverState::OFFLINE;
@@ -246,6 +357,9 @@ Status MCP45HVX1::resetI2cState() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   Status st = _busResetTracked();
   if (!st.ok()) {
     return st;
@@ -259,6 +373,9 @@ Status MCP45HVX1::resetI2cState() {
 Status MCP45HVX1::restorePowerOnDefaults() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
 
   Status st = writeTcon(cmd::TCON_DEFAULT);
@@ -281,10 +398,16 @@ Status MCP45HVX1::writeWiper(uint8_t code) {
 }
 
 Status MCP45HVX1::incrementWiper(uint8_t steps) {
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   return _sendWiperStepCommand(cmd::Command::Increment, steps);
 }
 
 Status MCP45HVX1::decrementWiper(uint8_t steps) {
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   return _sendWiperStepCommand(cmd::Command::Decrement, steps);
 }
 
@@ -496,6 +619,9 @@ Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   if (!_isValidRegister(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Register address is reserved");
   }
@@ -515,6 +641,9 @@ Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
 Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
   if (!_isWritableRegister(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Register address is not writable");
@@ -542,6 +671,9 @@ Status MCP45HVX1::readLastAddress(uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   if (_driverState == DriverState::OFFLINE) {
     return _offlineStatus();
   }
@@ -555,6 +687,9 @@ Status MCP45HVX1::readLastAddress(uint8_t& value) {
 Status MCP45HVX1::generalCallWriteWiper(uint8_t code) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
   if (!_isValidWiperCode(code, _config.resolution)) {
     return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", code);
@@ -573,6 +708,9 @@ Status MCP45HVX1::generalCallWriteTcon(uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   const uint8_t sanitized = sanitizeTcon(value);
   Status st = _generalCallWrite(cmd::GC_WRITE_TCON0, &sanitized, 1);
@@ -588,6 +726,9 @@ Status MCP45HVX1::generalCallIncrementWiper() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   Status st = _generalCallWrite(cmd::GC_INCREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
@@ -602,6 +743,9 @@ Status MCP45HVX1::generalCallDecrementWiper() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   Status st = _generalCallWrite(cmd::GC_DECREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
@@ -610,6 +754,221 @@ Status MCP45HVX1::generalCallDecrementWiper() {
     _markHardwareStateUncertain(st, true, false);
   }
   return st;
+}
+
+// ===========================================================================
+// Poll-Job Helpers
+// ===========================================================================
+
+Status MCP45HVX1::_startJob(JobType type, bool outputChanging, uint8_t instructionsPlanned,
+                            bool allowOffline) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (!allowOffline && _driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
+
+  _job = ActiveJob{};
+  _job.snapshot.type = type;
+  _job.snapshot.active = true;
+  _job.snapshot.outputChanging = outputChanging;
+  _job.snapshot.instructionsPlanned = instructionsPlanned;
+  _job.snapshot.status = Status::InProgress("Job in progress");
+  return Status::Ok();
+}
+
+Status MCP45HVX1::_startStepJob(JobType type, cmd::Command command, uint8_t steps) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (command != cmd::Command::Increment && command != cmd::Command::Decrement) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid wiper step command");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
+  if (steps == 0) {
+    return Status::Ok();
+  }
+
+  const uint8_t planned =
+      static_cast<uint8_t>((steps + cmd::MAX_COMMAND_CHUNK - 1U) / cmd::MAX_COMMAND_CHUNK);
+  Status st = _startJob(type, true, planned);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.remainingSteps = steps;
+  _job.stepCommand = command;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::_pollJobOneInstruction() {
+  switch (_job.snapshot.type) {
+    case JobType::SetWiper: {
+      Status st = _writeRegisterTracked(cmd::REG_WIPER0, _job.target);
+      if (!st.ok()) {
+        if (_isAmbiguousStateWriteFailure(st)) {
+          _markHardwareStateUncertain(st, true, false);
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_WIPER0, _job.target);
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::ReadSnapshot: {
+      if (_job.phase == 0) {
+        uint8_t wiper = 0;
+        Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
+        if (!st.ok()) {
+          return st;
+        }
+        _syncRegister(cmd::REG_WIPER0, wiper);
+        _markRegisterReadbackVerified(cmd::REG_WIPER0);
+        _job.snapshot.registers.wiper = wiper;
+        _job.phase = 1;
+        return Status::Ok();
+      }
+
+      uint8_t tcon = 0;
+      Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+      if (!st.ok()) {
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, tcon);
+      _markRegisterReadbackVerified(cmd::REG_TCON0);
+      _job.snapshot.registers.tcon = tcon;
+      _job.snapshot.registersValid = true;
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::SetTerminal: {
+      if (_job.phase == 0) {
+        uint8_t tcon = 0;
+        Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+        if (!st.ok()) {
+          return st;
+        }
+        _syncRegister(cmd::REG_TCON0, tcon);
+        _markRegisterReadbackVerified(cmd::REG_TCON0);
+
+        const uint8_t mask = _terminalMask(_job.terminal);
+        uint8_t next = tcon;
+        if (_job.terminalEnabled) {
+          next = static_cast<uint8_t>(next | mask);
+        } else {
+          next = static_cast<uint8_t>(next & ~mask);
+        }
+        next = sanitizeTcon(next);
+
+        if (next == tcon) {
+          _job.snapshot.instructionsPlanned = 1;
+          _completeJob(Status::Ok());
+          return Status::Ok();
+        }
+
+        _job.temp = next;
+        _job.phase = 1;
+        return Status::Ok();
+      }
+
+      Status st = _writeRegisterTracked(cmd::REG_TCON0, _job.temp);
+      if (!st.ok()) {
+        if (_isAmbiguousStateWriteFailure(st)) {
+          _markHardwareStateUncertain(st, false, true);
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, _job.temp);
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::IncrementWiper:
+    case JobType::DecrementWiper: {
+      const uint8_t chunk = _job.remainingSteps > cmd::MAX_COMMAND_CHUNK
+                                ? static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK)
+                                : _job.remainingSteps;
+      Status st = _sendWiperStepCommand(_job.stepCommand, chunk);
+      if (!st.ok()) {
+        return st;
+      }
+      _job.remainingSteps = static_cast<uint8_t>(_job.remainingSteps - chunk);
+      if (_job.remainingSteps == 0) {
+        _completeJob(Status::Ok());
+      }
+      return Status::Ok();
+    }
+
+    case JobType::Recover: {
+      if (_job.phase == 0) {
+        uint8_t wiper = 0;
+        Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
+        if (!st.ok()) {
+          if (_job.recoverStartedOffline) {
+            _reassertOfflineLatch();
+          }
+          return st;
+        }
+        _syncRegister(cmd::REG_WIPER0, wiper);
+        _markRegisterReadbackVerified(cmd::REG_WIPER0);
+        _job.snapshot.registers.wiper = wiper;
+        _job.phase = 1;
+        if (_job.recoverStartedOffline) {
+          _reassertOfflineLatch();
+        }
+        return Status::Ok();
+      }
+
+      uint8_t tcon = 0;
+      Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+      if (!st.ok()) {
+        if (_job.recoverStartedOffline) {
+          _reassertOfflineLatch();
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, tcon);
+      _markRegisterReadbackVerified(cmd::REG_TCON0);
+      _job.snapshot.registers.tcon = tcon;
+      _job.snapshot.registersValid = true;
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::None:
+    default:
+      return Status::Error(Err::INVALID_PARAM, "No active job");
+  }
+}
+
+bool MCP45HVX1::_jobRunsSingleInstructionPerPoll() const {
+  return _job.snapshot.type == JobType::SetWiper ||
+         _job.snapshot.type == JobType::IncrementWiper ||
+         _job.snapshot.type == JobType::DecrementWiper;
+}
+
+void MCP45HVX1::_completeJob(const Status& st) {
+  _job.snapshot.active = false;
+  _job.snapshot.status = st;
+}
+
+void MCP45HVX1::_resetJob() {
+  _job = ActiveJob{};
+  _job.snapshot.status = Status::Ok();
+}
+
+Status MCP45HVX1::_jobBusyStatus() const {
+  return Status::Error(Err::BUSY, "Poll job active");
 }
 
 // ===========================================================================

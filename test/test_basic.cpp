@@ -332,6 +332,11 @@ void test_status_ok_and_error() {
   TEST_ASSERT_FALSE(st.ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_INT32(42, st.detail);
+
+  Status pending = Status::InProgress();
+  TEST_ASSERT_TRUE(pending.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(pending.code));
 }
 
 void test_command_constants() {
@@ -1079,6 +1084,237 @@ void test_terminal_helpers() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   st = dev.setTerminalMode(TerminalMode::Custom);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+}
+
+void test_job_set_wiper_is_one_instruction_and_blocks_interleaving() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t readsAfterBegin = bus.readCalls;
+
+  Status st = dev.startSetWiperJob(0x44);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(dev.jobActive());
+
+  uint8_t value = 0;
+  st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin, bus.readCalls);
+
+  st = dev.pollJob(bus.nowMs, 5);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(dev.jobActive());
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::SetWiper),
+                          static_cast<uint8_t>(job.type));
+  TEST_ASSERT_FALSE(job.active);
+  TEST_ASSERT_TRUE(job.outputChanging);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+  TEST_ASSERT_TRUE(job.status.ok());
+
+  SettingsSnapshot settings = dev.getSettings();
+  TEST_ASSERT_TRUE(settings.cachedWiperKnown);
+  TEST_ASSERT_EQUAL_HEX8(0x44, settings.cachedWiper);
+  TEST_ASSERT_FALSE(settings.hardwareStateUncertain);
+}
+
+void test_job_snapshot_respects_instruction_budget() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t readsAfterBegin = bus.readCalls;
+  bus.wiper = 0x22;
+  bus.tcon = 0xF7;
+
+  TEST_ASSERT_TRUE(dev.startReadSnapshotJob().ok());
+
+  Status st = dev.pollJob(bus.nowMs, 0);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(0u, dev.getJobSnapshot().lastPollInstructions);
+
+  st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin + 1u, bus.readCalls);
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_TRUE(job.active);
+  TEST_ASSERT_FALSE(job.outputChanging);
+  TEST_ASSERT_FALSE(job.registersValid);
+  TEST_ASSERT_EQUAL_UINT8(2u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+  TEST_ASSERT_EQUAL_HEX8(0x22, job.registers.wiper);
+
+  st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin + 2u, bus.readCalls);
+  job = dev.getJobSnapshot();
+  TEST_ASSERT_FALSE(job.active);
+  TEST_ASSERT_TRUE(job.registersValid);
+  TEST_ASSERT_EQUAL_UINT8(2u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_HEX8(0x22, job.registers.wiper);
+  TEST_ASSERT_EQUAL_HEX8(0xF7, job.registers.tcon);
+}
+
+void test_job_terminal_setter_is_visible_read_modify_write() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t readsAfterBegin = bus.readCalls;
+  const uint32_t writesAfterBegin = bus.writeCalls;
+
+  TEST_ASSERT_TRUE(dev.startSetTerminalJob(Terminal::A, false).ok());
+  Status st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin + 1u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesAfterBegin, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, bus.tcon);
+
+  st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(writesAfterBegin + 1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, bus.tcon);
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::SetTerminal),
+                          static_cast<uint8_t>(job.type));
+  TEST_ASSERT_TRUE(job.outputChanging);
+  TEST_ASSERT_EQUAL_UINT8(2u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(2u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+}
+
+void test_job_terminal_setter_noop_consumes_read_only() {
+  FakeBus bus;
+  bus.tcon = 0xFB;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t readsAfterBegin = bus.readCalls;
+  const uint32_t writesAfterBegin = bus.writeCalls;
+
+  TEST_ASSERT_TRUE(dev.startSetTerminalJob(Terminal::A, false).ok());
+  Status st = dev.pollJob(bus.nowMs, 2);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin + 1u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesAfterBegin, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, bus.tcon);
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+}
+
+void test_job_step_sequence_runs_one_chunk_per_poll() {
+  FakeBus bus;
+  bus.wiper = 0x00;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint8_t steps = static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK + 2U);
+  TEST_ASSERT_TRUE(dev.startIncrementWiperJob(steps).ok());
+  Status st = dev.pollJob(bus.nowMs, 5);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK), bus.writeLenLog[0]);
+  TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK), bus.wiper);
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::IncrementWiper),
+                          static_cast<uint8_t>(job.type));
+  TEST_ASSERT_TRUE(job.outputChanging);
+  TEST_ASSERT_EQUAL_UINT8(2u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+
+  st = dev.pollJob(bus.nowMs, 5);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(2u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(2u, bus.writeLenLog[1]);
+  TEST_ASSERT_EQUAL_HEX8(steps, bus.wiper);
+  TEST_ASSERT_EQUAL_UINT8(2u, dev.getJobSnapshot().instructionsCompleted);
+}
+
+void test_job_step_failure_stops_remaining_chunks_and_marks_uncertain() {
+  FakeBus bus;
+  bus.wiper = 0x00;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.startIncrementWiperJob(130).ok());
+  Status st = dev.pollJob(bus.nowMs, 5);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK), bus.wiper);
+
+  bus.writeErrorAfterMutationRemaining = 1;
+  bus.failAfterAppliedCommands = 1;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "timeout after chunk mutation", -130);
+  st = dev.pollJob(bus.nowMs, 5);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_INT32(-130, st.detail);
+  TEST_ASSERT_FALSE(dev.jobActive());
+  TEST_ASSERT_EQUAL_UINT32(2u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK + 1U), bus.wiper);
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(3u, job.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.instructionsCompleted);
+  TEST_ASSERT_EQUAL_UINT8(1u, job.lastPollInstructions);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(job.status.code));
+
+  SettingsSnapshot settings = dev.getSettings();
+  TEST_ASSERT_FALSE(settings.cachedWiperKnown);
+  TEST_ASSERT_TRUE(settings.hardwareStateUncertain);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(settings.hardwareStateUncertainError.code));
+}
+
+void test_recover_job_keeps_offline_latch_until_full_readback() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  Status st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  const uint32_t readsAfterOffline = bus.readCalls;
+  bus.wiper = 0x33;
+  bus.tcon = 0xF7;
+  TEST_ASSERT_TRUE(dev.startRecoverJob().ok());
+
+  st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterOffline + 1u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+
+  st = dev.pollJob(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterOffline + 2u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+
+  JobSnapshot job = dev.getJobSnapshot();
+  TEST_ASSERT_TRUE(job.registersValid);
+  TEST_ASSERT_EQUAL_HEX8(0x33, job.registers.wiper);
+  TEST_ASSERT_EQUAL_HEX8(0xF7, job.registers.tcon);
 }
 
 void test_direct_register_access_rejects_reserved() {
@@ -1936,6 +2172,18 @@ void test_operations_reject_before_begin() {
                           static_cast<uint8_t>(dev.recover().code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.probe().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startSetWiperJob(0).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startReadSnapshotJob().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startSetTerminalJob(Terminal::A, true).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startIncrementWiperJob().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startDecrementWiperJob().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.startRecoverJob().code));
 }
 
 void test_example_transport_maps_wire_errors_and_read_only_transactions() {
@@ -1998,6 +2246,13 @@ int main() {
   RUN_TEST(test_increment_decrement_clamp_and_cache);
   RUN_TEST(test_tcon_write_sanitizes_reserved_bits);
   RUN_TEST(test_terminal_helpers);
+  RUN_TEST(test_job_set_wiper_is_one_instruction_and_blocks_interleaving);
+  RUN_TEST(test_job_snapshot_respects_instruction_budget);
+  RUN_TEST(test_job_terminal_setter_is_visible_read_modify_write);
+  RUN_TEST(test_job_terminal_setter_noop_consumes_read_only);
+  RUN_TEST(test_job_step_sequence_runs_one_chunk_per_poll);
+  RUN_TEST(test_job_step_failure_stops_remaining_chunks_and_marks_uncertain);
+  RUN_TEST(test_recover_job_keeps_offline_latch_until_full_readback);
   RUN_TEST(test_direct_register_access_rejects_reserved);
   RUN_TEST(test_read_last_address);
   RUN_TEST(test_i2c_reset_and_restore_defaults);

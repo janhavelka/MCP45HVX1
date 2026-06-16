@@ -129,6 +129,34 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `Status hardwareStateUncertainError()` - last ambiguous failure that set hardware uncertainty
 - `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, terminal-current limit, defaults
 
+### Poll-Chunked Jobs
+
+The synchronous raw APIs remain available, but side-effecting or multi-step
+work can also be driven as explicit jobs:
+
+- `Status startSetWiperJob(uint8_t code)`
+- `Status startReadSnapshotJob()`
+- `Status startSetTerminalJob(Terminal terminal, bool enabled)`
+- `Status startIncrementWiperJob(uint8_t steps = 1)`
+- `Status startDecrementWiperJob(uint8_t steps = 1)`
+- `Status startRecoverJob()`
+- `Status pollJob(uint32_t nowMs, uint8_t maxInstructions)`
+- `JobSnapshot getJobSnapshot()`
+
+A register read or command-write chunk is counted as one instruction.
+`startReadSnapshotJob()` reads Wiper then TCON as separate instructions.
+`startSetTerminalJob()` exposes the TCON read-modify-write as separate read and
+write phases, and completes after the read if the requested bit already matches.
+Wiper step jobs split requests into bounded command chunks and execute at most
+one chunk per poll. `startSetWiperJob()` is always one instruction.
+
+While a job is active, other bus-touching public APIs return `Err::BUSY` so an
+application-owned I2C task can keep ordering explicit. Ambiguous output-changing
+job failures use the same hardware-uncertainty and cache-invalidating semantics
+as the synchronous APIs. `startRecoverJob()` is the only job that may be started
+while OFFLINE; if it starts offline, the offline latch remains asserted until
+both Wiper and TCON readback instructions succeed.
+
 ### Wiper
 
 - `Status readWiper(uint8_t& code)`

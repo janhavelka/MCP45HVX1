@@ -24,6 +24,9 @@
 - Gated core General Call helpers behind explicit `Config::allowGeneralCall`
   opt-in while keeping diagnostic CLI General Call commands behind their
   existing operator arming and warnings.
+- Added poll-chunked job APIs for one-instruction Wiper writes, bounded
+  snapshot readback, visible terminal read-modify-write sequencing, chunked
+  Wiper step commands, and recovery readback with instruction-budget tests.
 - Strengthened native tests, fault-injection coverage, generated-artifact
   checks, Arduino/ESP-IDF CLI contract guards, stale-placeholder guards, and
   ESP-IDF native-boundary checks.
