@@ -610,7 +610,7 @@ void printErrataInfo() {
                     cli::warningIfNonZeroColor(info.generalCallRequiresIsolatedBusEvidence ? 1U : 0U),
                     log_bool_str(info.generalCallRequiresIsolatedBusEvidence),
                     LOG_COLOR_RESET);
-  LOG_SERIAL.println("  Source: docs/MCP45HVX1_Errata_DS80000649B.pdf");
+  LOG_SERIAL.println("  Source: docs/reference-pdfs/MCP45HVX1_Errata_DS80000649B.pdf");
 }
 
 void printTerminalStatus(uint8_t tcon) {

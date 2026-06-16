@@ -354,11 +354,12 @@ physical output after a write failure.
 ## Address Note
 
 DS20005304B Rev B Table 6-2 and the official PDF text give fixed address bits
-`01111`, so the default address range is `0x3C-0x3F`. The extracted markdown in
-`docs/08_variant_differences_and_open_questions.md` records an apparent
-`0x5C-0x5F` conflict from command figures. The driver defaults to `0x3C` and
-accepts `0x5C-0x5F` only when `Config::allowAlternateAddressRange` is explicitly
-enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
+`01111`, so the default address range is `0x3C-0x3F`. The maintained device
+reference records an apparent `0x5C-0x5F` conflict from command figures. The
+driver defaults to `0x3C` and accepts `0x5C-0x5F` only when
+`Config::allowAlternateAddressRange` is explicitly enabled for
+hardware-verification builds. See `ASSUMPTIONS.md` and
+`docs/DEVICE_REFERENCE.md`.
 
 Hardware validation must verify the populated A1/A0 address, silicon marking
 and errata applicability, WLAT and SHDN board strap behavior, General Call
@@ -547,21 +548,12 @@ for audit, documentation, validation, and release work.
 - [Docs Index](docs/README.md)
 - [Assumptions](ASSUMPTIONS.md)
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
-- <a href="docs/MCP45HVX1_INDUSTRY_HARDENING_FINAL_REPORT.md">Industry Hardening Final Report</a>
-- <a href="docs/05_register_map.md">Register Map</a>
-- <a href="docs/register_reference.md">Driver Register Reference</a>
+- <a href="docs/DEVICE_REFERENCE.md">Device Reference</a>
 - <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
 - <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
-- <a href="docs/MCP45HVX1_FINAL_DOCS_RELEASE_CLEANUP_REPORT.md">Final Docs Release Cleanup Report</a>
-- <a href="docs/MCP45HVX1_HIL_TOOLING_REPORT.md">HIL Tooling Report</a>
-- <a href="docs/MCP45HVX1_ESP_IDF_PARITY_REPORT.md">ESP-IDF Parity Report</a>
-- <a href="docs/MCP45HVX1_DEVICE_MODEL_ERRATA_REPORT.md">Device Model And Errata Report</a>
-- <a href="docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md">Docs Release Metadata Report</a>
-- [ESP-IDF Port Notes](docs/IDF_PORT.md)
-- [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
-- <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
-- <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
+- <a href="docs/IDF_PORT.md">ESP-IDF Port</a>
+- <a href="docs/HARDENING_SUMMARY.md">Hardening Summary</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
   and the native IDF entry point.
 

@@ -45,6 +45,9 @@
   examples, metadata, and selected current docs while excluding generated
   archives, local build output, tests, tools, prompts, CI metadata, large PDFs,
   and extracted reference markdown.
+- Simplified `docs/` around maintained API, device reference, IDF, hardware
+  validation, release checklist, and hardening summary documents; removed
+  prompt-era reports and raw extraction leftovers from the maintained tree.
 - Kept release tag creation pending explicit approval and release-checklist
   evidence.
 

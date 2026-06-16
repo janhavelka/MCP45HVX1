@@ -22,8 +22,6 @@ files:
     - "examples/01_basic_bringup_cli/**/*"
     - "examples/common/**/*"
     - "docs/**/*.pdf"
-    - "docs/extracted-md/**/*"
-    - "docs/pdf-extracted-md/**/*"
     - "*.tar.gz"
     - "*.tgz"
     - "*.zip"

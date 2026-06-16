@@ -311,7 +311,7 @@ def main() -> int:
         path.read_text(encoding="utf-8", errors="replace")
         for path in [
             ROOT / "README.md",
-            ROOT / "docs" / "MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md",
+            ROOT / "docs" / "IDF_PORT.md",
         ]
         if path.exists()
     )

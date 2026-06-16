@@ -74,10 +74,11 @@ repository unless a release explicitly decides to ship them.
 | Gate | Evidence |
 |---|---|
 | API contract current | `docs/MCP45HVX1_API_CONTRACT.md` reviewed |
+| Device reference current | `docs/DEVICE_REFERENCE.md` reviewed |
 | Hardware validation doc current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` reviewed |
-| HIL tooling report current | `docs/MCP45HVX1_HIL_TOOLING_REPORT.md` reviewed |
+| HIL runner behavior current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` and `tools/run_hil_mcp45hvx1.py` reviewed |
 | Release checklist current | this file reviewed |
-| Stale reports handled | historical reports have superseded/current-status notes |
+| Maintained docs structure reviewed | `docs/README.md` links only current docs and reference PDFs |
 | README honesty | no unsupported production/industry/hardware-validation claims |
 | SECURITY/CONTRIBUTING current | no stale persistent-storage or missing-format-tool references |
 
