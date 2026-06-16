@@ -18,6 +18,7 @@ files:
     - "tests/**/*"
     - "tools/**/*"
     - "prompts/**/*"
+    - "docs/prompts/**/*"
     - "examples/01_basic_bringup_cli/**/*"
     - "examples/common/**/*"
     - "docs/**/*.pdf"

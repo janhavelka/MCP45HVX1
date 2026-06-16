@@ -197,7 +197,7 @@ Differences between standard (E-grade) and automotive variants are referenced in
 
 ### 6.8 Errata
 
-The errata is available as `MCP45HVX1_Errata_DS80000649B.pdf` with raw text in `extracted-md/MCP45HVX1_Errata_DS80000649B.md`. It documents I2C-interface anomalies that can affect shared-bus behavior and General Call handling. This is a production release gate: review actual silicon marking/date code, require isolated-bus evidence for output-changing General Call on affected or unknown silicon, or record explicit shared-bus risk acceptance.
+The errata is available as `MCP45HVX1_Errata_DS80000649B.pdf` with raw text in `pdf-extracted-md/MCP45HVX1_Errata_DS80000649B.md`. It documents I2C-interface anomalies that can affect shared-bus behavior and General Call handling. This is a production release gate: review actual silicon marking/date code, require isolated-bus evidence for output-changing General Call on affected or unknown silicon, or record explicit shared-bus risk acceptance.
 
 ### 6.9 Startup Analog Rail Behavior During POR
 

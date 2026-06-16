@@ -4,7 +4,11 @@ Branch: `hardening/mcp45hvx1-industry-readiness`
 
 Base commit for final cleanup: `5965ac6`
 
-Status: merge-preparation complete pending final cleanup commit and push.
+Initial final-cleanup commit: `7e33623`
+
+Status: merge-preparation cleanup completed on the hardening branch. This
+report remains evidence-gated: use the final response or git history for the
+current branch tip after any follow-up verification-only doc updates.
 
 This report closes the original audit findings for the software hardening
 branch. It is not a release approval and does not claim hardware validation,
@@ -58,6 +62,6 @@ requests to `main`; direct hardening-branch pushes are not remote CI evidence.
 ## Merge Recommendation
 
 The hardening branch is suitable for merge review as a software-hardening and
-documentation cleanup branch after final checks pass and the cleanup commit is
-pushed. It is not suitable for release approval or production/field claims until
-the release checklist evidence is complete.
+documentation cleanup branch after final checks pass. It is not suitable for
+release approval or production/field claims until the release checklist evidence
+is complete.

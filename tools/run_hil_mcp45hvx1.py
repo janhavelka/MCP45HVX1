@@ -299,7 +299,9 @@ class HilRun:
                 self.run_command(cli, "readtcon", "output-change-verify")
                 if self.args.operator_prompts:
                     measured = prompt_line(f"Record terminal measurement for mode {mode}: ")
-                self.note(f"TCON mode {mode} measurement: {measured}")
+                    self.note(f"TCON mode {mode} measurement: {measured}")
+                else:
+                    self.note(f"TCON mode {mode} measurement not collected; operator review required.")
 
         self.restore_baseline(cli, "output-change-restore")
         if not self.args.operator_prompts:
@@ -655,7 +657,8 @@ class HilRun:
             "",
             f"- Safe-only HIL evidence: `{summary['verdict'] in {PASS_SAFE_ONLY, PASS_WITH_OUTPUT_CHANGE, OPERATOR_REVIEW_REQUIRED}}`.",
             f"- Output-changing HIL evidence: `{summary['verdict'] == PASS_WITH_OUTPUT_CHANGE}`.",
-            f"- General Call evidence: `{summary['include_general_call'] and summary['confirm_isolated_bus'] and summary['verdict'] == PASS_WITH_OUTPUT_CHANGE}`.",
+            f"- General Call isolated-bus command evidence: `{summary['include_general_call'] and summary['confirm_isolated_bus'] and summary['verdict'] == PASS_WITH_OUTPUT_CHANGE}`.",
+            "- General Call analog/safety evidence: `false` unless operator notes attach external measurements and release-checklist signoff.",
             "- High-voltage evidence: `false` unless operator notes attach external measurements.",
             "",
         ])

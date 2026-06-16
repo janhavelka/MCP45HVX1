@@ -4,7 +4,10 @@ Branch: `hardening/mcp45hvx1-industry-readiness`
 
 Base commit before cleanup: `5965ac6`
 
-Cleanup commit: recorded in final response after commit creation.
+Initial cleanup commit: `7e33623`
+
+Follow-up verification commit: recorded in the final response if this report is
+updated after the initial cleanup commit.
 
 ## Scope
 
@@ -22,6 +25,12 @@ not add feature-hardening work and did not claim hardware validation.
 - Updated `AGENTS.md` with MCP45HVX1-specific hardening rules.
 - Updated prompt archive documentation under `prompts/`.
 - Updated release/package metadata notes.
+- Follow-up verification fixed a stale errata extraction link in
+  `docs/08_variant_differences_and_open_questions.md`.
+- Follow-up verification fixed the HIL runner's non-interactive TCON-toggle
+  measurement note path and clarified generated General Call evidence wording.
+- Follow-up verification removed superseded untracked prompt drafts under
+  `docs/prompts/` and added package excludes for that path.
 
 ## Stale Docs And Prompt Artifacts
 
@@ -45,7 +54,8 @@ industry-readiness hardening branch, hardware validation pending.
 
 - `library.json` and `idf_component.yml` keep package exports focused on
   headers, source, examples, metadata, and selected current docs.
-- Large PDFs, extracted markdown, tests, tools, CI metadata, prompts, local
+- Large PDFs, extracted markdown, tests, tools, CI metadata, prompts, prompt
+  drafts under `docs/prompts/` if present, local
   build output, HIL logs, and generated archives are excluded from normal
   package surfaces.
 - Generated package tarballs must be removed before commit.
@@ -77,6 +87,7 @@ cleanup. Hardware validation remains pending.
 Final check results recorded during this cleanup pass:
 
 - `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` - passed.
+- `python tools/run_hil_mcp45hvx1.py --help` - passed; no hardware was touched.
 - `python tools/check_core_timing_guard.py` - passed.
 - `python tools/check_cli_contract.py` - passed.
 - `python tools/check_idf_example_contract.py` - passed.
@@ -88,10 +99,11 @@ Final check results recorded during this cleanup pass:
 - `python -m platformio run -e esp32s2dev` - passed.
 - `python -m platformio pkg pack` - passed and produced
   `MCP45HVX1-1.0.0.tar.gz`.
-- Package artifact size was 87,532 bytes.
+- Package artifact size was about 88 KB during verification; the exact byte
+  count can shift with this included report text and gzip metadata.
 - Package content inspection found 47 files and no `.github`, `.pio`, `test`,
-  `tests`, `tools`, `prompts`, `hil_logs`, `__pycache__`, `*.pyc`, PDFs,
-  extracted-doc trees, nested archives, or local build output.
+  `tests`, `tools`, `prompts`, `docs/prompts`, `hil_logs`, `__pycache__`,
+  `*.pyc`, PDFs, extracted-doc trees, nested archives, or local build output.
 - Generated package tarball was removed before commit.
 - `python tools/check_generated_artifacts.py` - passed again after removing the
   package archive.
@@ -124,7 +136,6 @@ Final check results recorded during this cleanup pass:
 
 ## Final Recommendation
 
-Merge review: recommended after final checks pass and the cleanup commit is
-pushed.
+Merge review: recommended after final checks pass.
 
 Release: not recommended until the release checklist evidence is complete.

@@ -525,7 +525,6 @@ for audit, documentation, validation, and release work.
 - <a href="docs/MCP45HVX1_DOCS_RELEASE_METADATA_REPORT.md">Docs Release Metadata Report</a>
 - [ESP-IDF Port Notes](docs/IDF_PORT.md)
 - [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
-- <a href="docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md">CLI Parity And Color Report</a>
 - <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
 - <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
