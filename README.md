@@ -485,21 +485,26 @@ General Call command.
 `tools/run_hil_mcp45hvx1.py` captures attachable hardware-in-loop evidence from
 the Arduino or ESP-IDF CLI over serial. The default sequence is safe/read-only:
 `version`, `color off`, `help`, `scan`, `addr`, optional address selection,
-`probe`, `cfg`, `state`, `drv`, `readwiper`, `readtcon`, `dump`,
-`selftest safe`, `stress 100`, final `state`, and final `drv`.
+`probe`, `cfg`, `settings`, `state`, `drv`, `health`, `readwiper`,
+`readtcon`, `dump`, `selftest safe`, `stress 100`, final `state`, and final
+`drv`.
 
 ```bash
 python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C
 python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-output-change --operator-prompts
-python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-general-call --confirm-isolated-bus
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-general-call --confirm-isolated-bus --operator-prompts
 ```
 
-Output-changing groups require explicit flags. `--include-output-change`
-captures Wiper/TCON baseline, writes bounded values, reads back, restores the
-baseline, and reports `FAIL_RESTORE_UNCERTAIN` if restore cannot be verified.
+Output-changing groups require explicit flags and `--operator-prompts`; the
+operator must confirm a safe load and measurement setup before local Wiper/TCON
+changes run. `--include-output-change` captures Wiper/TCON baseline, writes
+bounded values, reads back, restores the baseline, and reports
+`FAIL_RESTORE_UNCERTAIN` if restore cannot be verified.
 `--include-shdn` and `--include-wlat` require `--operator-prompts` because
 physical pin behavior must be observed separately from register readback.
-`--include-general-call` requires `--confirm-isolated-bus` and records the
+`--include-general-call` requires `--confirm-isolated-bus` and
+`--operator-prompts` so the operator confirms the isolated bus and safe-load
+setup before any broadcast command is sent. The runner records the
 errata/isolation warning in the evidence.
 
 Each run writes `hil_logs/mcp45hvx1_<timestamp>/` with `raw_serial.txt`,
@@ -517,7 +522,7 @@ framework; applications that consume this library through `lib_deps` do not need
 to add a separate `Wire` dependency.
 
 ```bash
-python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py
+python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio test -e native
@@ -525,6 +530,7 @@ python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_generated_artifacts.py
+python tools/test_run_hil_mcp45hvx1_parser.py
 python scripts/generate_version.py check
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)

@@ -62,7 +62,7 @@ These checks must not intentionally change analog output:
 | `version`, `color off`, `help` | Firmware/library version and color-disabled transcript | Pending |
 | `scan`, `addr`, optional address selection | Bus scan and active address recorded | Pending |
 | `probe` | Raw Wiper read result and status; no health/cache mutation claim | Pending |
-| `cfg`, `state`, `drv` | Address, variant, cache-known flags, uncertainty, and last status visible | Pending |
+| `cfg`, `settings`, `state`, `drv`, `health` | Address, variant, cache-known flags, uncertainty, and last status visible | Pending |
 | `readwiper`, `readtcon`, `dump` | Volatile Wiper/TCON and raw pointer readback captured | Pending |
 | `selftest safe` | Read-only or state-restoring behavior documented by log | Pending |
 | `stress 100` | Read-only stress summary with no output-changing frames | Pending |
@@ -112,7 +112,7 @@ evidence is accepted:
 
 | Command/API | Evidence required | Result |
 |---|---|---|
-| `--include-output-change` | Baseline Wiper/TCON, command log, readback, measurements, restore | Pending |
+| `--include-output-change --operator-prompts` | Safe-load confirmation, baseline Wiper/TCON, command log, readback, measurements, restore | Pending |
 | `--include-wiper-ramp` | Bounded ramp values, measurements for each point, restore | Pending |
 | Wiper write / percent / fraction | Baseline, command log, readback, analog measurement, restore | Pending |
 | INC/DEC | Baseline, step count, readback, analog measurement, restore | Pending |
@@ -156,9 +156,11 @@ readback must be recorded separately from physical output observations.
 Output-changing General Call commands require an isolated MCP45HVX1 bus unless
 a documented shared-bus risk acceptance is approved.
 
-The HIL runner must be invoked with `--include-general-call` and
-`--confirm-isolated-bus` before any General Call command is sent. The errata
-warning must appear in `raw_serial.txt`, `summary.json`, and `report.md`.
+The HIL runner must be invoked with `--include-general-call`,
+`--confirm-isolated-bus`, and `--operator-prompts` before any General Call
+command is sent. The operator must confirm the isolated bus and safe-load setup.
+The errata warning must appear in `raw_serial.txt`, `summary.json`, and
+`report.md`.
 
 | Command | ACK/NACK | Readback verified | Analog measured | Isolation/risk decision |
 |---|---|---|---|---|

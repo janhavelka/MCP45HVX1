@@ -35,11 +35,12 @@ production-ready or industry-grade.
 
 | Gate | Command/evidence |
 |---|---|
-| Python tool syntax | `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` |
+| Python tool syntax | `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` |
 | Core timing guard | `python tools/check_core_timing_guard.py` |
 | Arduino/CLI contract | `python tools/check_cli_contract.py` |
 | ESP-IDF example contract | `python tools/check_idf_example_contract.py` |
 | Generated artifact guard | `python tools/check_generated_artifacts.py` |
+| HIL parser/evidence guard | `python tools/test_run_hil_mcp45hvx1_parser.py` |
 | Version check | `python scripts/generate_version.py check` |
 | Native tests | `python -m platformio test -e native` |
 | Arduino ESP32-S3 build | `python -m platformio run -e esp32s3dev` |

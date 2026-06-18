@@ -14,6 +14,8 @@
 
 namespace transport {
 
+static constexpr size_t WIRE_BUFFER_LIMIT = 64;
+
 struct BusResetContext {
   int sda = -1;
   int scl = -1;
@@ -46,15 +48,18 @@ inline MCP45HVX1::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
-  (void)timeoutMs;
+  if (timeoutMs == 0) {
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "I2C timeout must be > 0");
+  }
   if (data == nullptr || len == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C write params");
   }
-  if (len > 128) {
+  if (len > WIRE_BUFFER_LIMIT) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Write exceeds I2C buffer",
                                     static_cast<int32_t>(len));
   }
 
+  wire->setTimeOut(timeoutMs);
   wire->beginTransmission(addr);
   const size_t written = wire->write(data, len);
   if (written != len) {
@@ -72,14 +77,17 @@ inline MCP45HVX1::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
   if (wire == nullptr) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_CONFIG, "Wire instance is null");
   }
-  (void)timeoutMs;
+  if (timeoutMs == 0) {
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "I2C timeout must be > 0");
+  }
   if ((txLen > 0 && tx == nullptr) || rx == nullptr || rxLen == 0) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "Invalid I2C read params");
   }
-  if (txLen > 128 || rxLen > 128) {
+  if (txLen > WIRE_BUFFER_LIMIT || rxLen > WIRE_BUFFER_LIMIT) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, "I2C read exceeds buffer");
   }
 
+  wire->setTimeOut(timeoutMs);
   if (txLen > 0) {
     wire->beginTransmission(addr);
     const size_t written = wire->write(tx, txLen);

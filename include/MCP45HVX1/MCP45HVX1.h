@@ -269,6 +269,9 @@ public:
   /// @return Current driver health state.
   DriverState state() const { return _driverState; }
 
+  /// @return Current driver health state; compatibility alias for sibling drivers.
+  DriverState driverState() const { return state(); }
+
   /// @return true after begin() establishes config/transport state and before end().
   /// A failed optional startup write can still leave this true for diagnostics.
   bool isInitialized() const { return _initialized; }
@@ -318,10 +321,10 @@ public:
   /// @return Current consecutive tracked failure count.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
 
-  /// @return Total tracked failures since the last successful begin().
+  /// @return Total tracked failures since the last lifecycle reset or begin attempt.
   uint32_t totalFailures() const { return _totalFailures; }
 
-  /// @return Total tracked successes since the last successful begin().
+  /// @return Total tracked successes since the last lifecycle reset or begin attempt.
   uint32_t totalSuccess() const { return _totalSuccess; }
 
   // =========================================================================
@@ -646,7 +649,7 @@ private:
   uint8_t _cachedTcon = cmd::TCON_DEFAULT;
   bool _wiperReadbackRequiredForUncertainty = false;
   bool _tconReadbackRequiredForUncertainty = false;
-  bool _addressPointerKnown = true;
+  bool _addressPointerKnown = false;
   uint8_t _addressPointer = cmd::REG_WIPER0;
 
   ActiveJob _job;

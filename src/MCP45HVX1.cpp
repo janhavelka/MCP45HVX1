@@ -41,7 +41,7 @@ Status MCP45HVX1::begin(const Config& config) {
   _totalSuccess = 0;
   _clearCachedRegisters();
   _clearHardwareStateUncertainty();
-  _addressPointerKnown = true;
+  _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
   _resetJob();
 
@@ -57,7 +57,7 @@ Status MCP45HVX1::begin(const Config& config) {
     _totalSuccess = 0;
     _clearCachedRegisters();
     _clearHardwareStateUncertainty();
-    _addressPointerKnown = true;
+    _addressPointerKnown = false;
     _addressPointer = cmd::REG_WIPER0;
     _resetJob();
     return failure;
@@ -151,7 +151,7 @@ void MCP45HVX1::end() {
   _totalSuccess = 0;
   _clearCachedRegisters();
   _clearHardwareStateUncertainty();
-  _addressPointerKnown = true;
+  _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
   _resetJob();
 }
@@ -360,13 +360,15 @@ Status MCP45HVX1::resetI2cState() {
   if (_job.snapshot.active) {
     return _jobBusyStatus();
   }
+  if (_config.busReset == nullptr) {
+    return _busResetTracked();
+  }
+  _addressPointerKnown = false;
+  _addressPointer = cmd::REG_WIPER0;
   Status st = _busResetTracked();
   if (!st.ok()) {
     return st;
   }
-
-  _addressPointerKnown = false;
-  _addressPointer = cmd::REG_WIPER0;
   return st;
 }
 
@@ -1213,7 +1215,16 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
   if (len == 1) {
     payload[1] = data[0];
   }
-  return _i2cWriteTracked(cmd::GENERAL_CALL_ADDRESS, payload, len + 1);
+  Status st = _i2cWriteRaw(cmd::GENERAL_CALL_ADDRESS, payload, len + 1);
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
+    return st;
+  }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
+  _addressPointerKnown = false;
+  _addressPointer = cmd::REG_WIPER0;
+  return st;
 }
 
 // ===========================================================================

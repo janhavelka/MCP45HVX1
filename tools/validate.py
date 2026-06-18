@@ -24,6 +24,7 @@ def main() -> int:
     run([python, "tools/check_idf_example_contract.py"])
     run([python, "tools/check_core_timing_guard.py"])
     run([python, "tools/check_generated_artifacts.py"])
+    run([python, "tools/test_run_hil_mcp45hvx1_parser.py"])
     run([python, "scripts/generate_version.py", "check"])
     obj = os.devnull
 

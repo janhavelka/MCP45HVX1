@@ -369,9 +369,12 @@ void test_config_defaults() {
 
 void test_begin_rejects_invalid_config() {
   Driver dev;
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
+
   Config cfg;
   Status st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
 
   FakeBus bus;
   cfg = makeConfig(bus);
@@ -463,6 +466,47 @@ void test_begin_reads_and_caches_registers() {
   const SettingsSnapshot byValue = dev.getSettings();
   TEST_ASSERT_EQUAL_HEX8(s.cachedWiper, byValue.cachedWiper);
   TEST_ASSERT_EQUAL_HEX8(s.cachedTcon, byValue.cachedTcon);
+}
+
+void test_driver_state_alias_matches_state() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(dev.driverState()));
+
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(dev.state()),
+                          static_cast<uint8_t>(dev.driverState()));
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_TIMEOUT, "state alias timeout", -91);
+  (void)dev.readWiper(bus.wiper);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(dev.state()),
+                          static_cast<uint8_t>(dev.driverState()));
+}
+
+void test_get_settings_is_cache_only_and_bus_silent() {
+  FakeBus bus;
+  bus.wiper = 0x42;
+  bus.tcon = 0xFB;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t readsAfterBegin = bus.readCalls;
+  const uint32_t writesAfterBegin = bus.writeCalls;
+
+  SettingsSnapshot out;
+  TEST_ASSERT_TRUE(dev.getSettings(out).ok());
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesAfterBegin, bus.writeCalls);
+
+  const SettingsSnapshot byValue = dev.getSettings();
+  TEST_ASSERT_EQUAL_UINT32(readsAfterBegin, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesAfterBegin, bus.writeCalls);
+  TEST_ASSERT_TRUE(byValue.cachedWiperKnown);
+  TEST_ASSERT_TRUE(byValue.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0x42, byValue.cachedWiper);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, byValue.cachedTcon);
 }
 
 void test_read_snapshot_does_not_partially_overwrite_output_on_failure() {
@@ -860,6 +904,7 @@ void test_failed_begin_clears_stale_runtime_snapshot() {
   TEST_ASSERT_EQUAL_UINT8(5u, snap.config.offlineThreshold);
   TEST_ASSERT_FALSE(snap.cachedWiperKnown);
   TEST_ASSERT_FALSE(snap.cachedTconKnown);
+  TEST_ASSERT_FALSE(snap.addressPointerKnown);
   TEST_ASSERT_EQUAL_UINT32(0u, snap.totalSuccess);
   TEST_ASSERT_EQUAL_UINT32(0u, snap.totalFailures);
   TEST_ASSERT_EQUAL_UINT8(0u, snap.consecutiveFailures);
@@ -882,6 +927,7 @@ void test_end_resets_lifecycle_without_device_io() {
   TEST_ASSERT_FALSE(snap.cachedWiperKnown);
   TEST_ASSERT_FALSE(snap.cachedTconKnown);
   TEST_ASSERT_FALSE(snap.hardwareStateUncertain);
+  TEST_ASSERT_FALSE(snap.addressPointerKnown);
 
   uint8_t value = 0;
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
@@ -1379,10 +1425,12 @@ void test_general_call_helpers() {
   TEST_ASSERT_TRUE(dev.generalCallWriteWiper(0x44).ok());
   TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
   TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
 
   TEST_ASSERT_TRUE(dev.generalCallIncrementWiper().ok());
   TEST_ASSERT_EQUAL_HEX8(0x45, bus.wiper);
   TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
 
   TEST_ASSERT_TRUE(dev.generalCallDecrementWiper().ok());
   TEST_ASSERT_EQUAL_HEX8(0x44, bus.wiper);
@@ -1391,6 +1439,7 @@ void test_general_call_helpers() {
   TEST_ASSERT_TRUE(dev.generalCallWriteTcon(0x07).ok());
   TEST_ASSERT_EQUAL_HEX8(0xF7, bus.tcon);
   TEST_ASSERT_FALSE(dev.getSettings().cachedTconKnown);
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
   TEST_ASSERT_EQUAL_UINT32(4u, bus.generalCallWrites);
 
   bus.resolution = Resolution::Bits7;
@@ -1460,6 +1509,46 @@ void test_i2c_reset_ok_from_degraded_does_not_mark_ready_without_device_read() {
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
                           static_cast<uint8_t>(dev.state()));
+}
+
+void test_general_call_success_does_not_prove_local_health_or_stale_pointer() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeGeneralCallConfig(bus)).ok());
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_TIMEOUT, "read timeout", -5);
+  uint8_t value = 0;
+  Status st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+
+  TEST_ASSERT_TRUE(dev.generalCallIncrementWiper().ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.consecutiveFailures());
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
+
+  TEST_ASSERT_TRUE(dev.writeTcon(0xFB).ok());
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.addressPointerKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, snap.cachedTcon);
+
+  TEST_ASSERT_TRUE(dev.generalCallWriteWiper(0x44).ok());
+  uint8_t last = 0;
+  TEST_ASSERT_TRUE(dev.readLastAddress(last).ok());
+  snap = dev.getSettings();
+  TEST_ASSERT_FALSE(snap.addressPointerKnown);
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(0xFB, snap.cachedTcon);
 }
 
 void test_i2c_reset_ok_then_device_read_success_returns_ready() {
@@ -2012,6 +2101,7 @@ void test_failed_bus_reset_updates_health() {
   bus.nowMs = 4000;
   Status st = dev.resetI2cState();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUS), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.getSettings().addressPointerKnown);
   TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
   TEST_ASSERT_EQUAL_UINT32(4000u, dev.lastErrorMs());
 }
@@ -2197,14 +2287,16 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   Status st = transport::wireWrite(0x3C, &byte, 1, 123, &Wire);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(123u, Wire.getTimeOut());
 
   uint8_t rx[2] = {};
   const uint8_t readData[2] = {0x00, 0x7F};
   Wire._clearEndTransmissionResult();
   Wire._setReadData(readData, sizeof(readData));
-  st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
+  st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 124, &Wire);
   TEST_ASSERT_TRUE(st.ok());
   TEST_ASSERT_EQUAL_HEX8(0x7F, rx[1]);
+  TEST_ASSERT_EQUAL_UINT32(124u, Wire.getTimeOut());
 
   Wire._setRequestFromResult(1);
   st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
@@ -2212,8 +2304,15 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   Wire._clearRequestFromOverride();
 
   uint8_t tooLargeForStub[65] = {};
+  st = transport::wireWrite(0x3C, &byte, 1, 0, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 0, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   st = transport::wireWrite(0x3C, tooLargeForStub, sizeof(tooLargeForStub), 123, &Wire);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = transport::wireWriteRead(0x3C, tooLargeForStub, sizeof(tooLargeForStub),
+                                rx, sizeof(rx), 123, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
 int main() {
@@ -2226,6 +2325,8 @@ int main() {
   RUN_TEST(test_begin_preserves_transport_status_except_address_nack);
   RUN_TEST(test_begin_address_matrix);
   RUN_TEST(test_begin_reads_and_caches_registers);
+  RUN_TEST(test_driver_state_alias_matches_state);
+  RUN_TEST(test_get_settings_is_cache_only_and_bus_silent);
   RUN_TEST(test_read_snapshot_does_not_partially_overwrite_output_on_failure);
   RUN_TEST(test_begin_without_initial_writes_is_read_only);
   RUN_TEST(test_device_info_and_resistance_helpers);
@@ -2260,6 +2361,7 @@ int main() {
   RUN_TEST(test_i2c_reset_ok_then_device_read_success_returns_ready);
   RUN_TEST(test_i2c_reset_reports_unsupported_without_callback);
   RUN_TEST(test_general_call_helpers);
+  RUN_TEST(test_general_call_success_does_not_prove_local_health_or_stale_pointer);
   RUN_TEST(test_general_call_disabled_by_default_without_bus_io);
   RUN_TEST(test_write_wiper_pre_mutation_failure_does_not_set_uncertainty);
   RUN_TEST(test_write_wiper_mutate_then_fail_marks_uncertain);

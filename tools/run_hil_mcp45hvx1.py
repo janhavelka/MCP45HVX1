@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
@@ -22,6 +23,8 @@ FAIL = "FAIL"
 FAIL_RESTORE_UNCERTAIN = "FAIL_RESTORE_UNCERTAIN"
 OPERATOR_REVIEW_REQUIRED = "OPERATOR_REVIEW_REQUIRED"
 SKIPPED_UNSAFE = "SKIPPED_UNSAFE"
+MAX_COMMAND_OUTPUT_BYTES = 64 * 1024
+OUTPUT_TRUNCATED_MARKER = "\n[HIL_OUTPUT_TRUNCATED]\n"
 
 
 @dataclass
@@ -51,6 +54,13 @@ def parse_address(text: str) -> int:
     value = int(text, 0)
     if value < 0 or value > 0x7F:
         raise argparse.ArgumentTypeError("address must be a 7-bit value")
+    return value
+
+
+def parse_positive_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("value must be finite and greater than zero")
     return value
 
 
@@ -98,10 +108,20 @@ class SerialCli:
         deadline = time.monotonic() + (timeout if timeout is not None else self._timeout)
         last_rx = time.monotonic()
         chunks: list[bytes] = []
+        total_bytes = 0
         while time.monotonic() < deadline:
             data = self._serial.read(4096)
             if data:
+                remaining = MAX_COMMAND_OUTPUT_BYTES - total_bytes
+                if remaining <= 0:
+                    chunks.append(OUTPUT_TRUNCATED_MARKER.encode("utf-8"))
+                    break
+                if len(data) > remaining:
+                    chunks.append(data[:remaining])
+                    chunks.append(OUTPUT_TRUNCATED_MARKER.encode("utf-8"))
+                    break
                 chunks.append(data)
+                total_bytes += len(data)
                 last_rx = time.monotonic()
                 decoded = b"".join(chunks).decode("utf-8", errors="replace")
                 if decoded.endswith("> ") or decoded.endswith("\n> "):
@@ -118,25 +138,37 @@ class SerialCli:
 
 def command_failed(command: str, output: str) -> bool:
     text = strip_ansi(output)
-    if command in {"help", "?", "version", "ver"}:
-        return False
+    if not text.strip() or text.strip() == ">":
+        return True
+    if OUTPUT_TRUNCATED_MARKER.strip() in text:
+        return True
     if re.search(r"(?m)^\s*\[FAIL\]", text):
         return True
     if re.search(r"(?m)^\s*\[E\]", text):
         return True
-    if "Unknown command" in text or "Usage:" in text:
+    if "Unknown command" in text:
+        return True
+    if "Usage:" in text and command not in {"help", "?"}:
         return True
     if re.search(r"(?i)restore .*failed", text):
         return True
+    if re.search(r"(?mi)^\s*(?:Result|Restore)\s*:\s*FAIL\b", text):
+        return True
     if re.search(r"(?m)\bStatus:\s+(?!OK\b)[A-Z_]+", text):
         return True
-    if re.search(r"(?m)^(?:probe|read|readwiper|readtcon|dump|stress|selftest|gc|wiper|tcon|mode|raw write)[^:\n]*:\s+(?!OK\b)[A-Z_]+", text):
+    command_prefixes = (
+        r"probe|read|readwiper|readtcon|dump|stress|selftest|gc|wiper|tcon|"
+        r"mode|raw write|cfg|settings|drv|health|state"
+    )
+    if re.search(rf"(?m)^(?:{command_prefixes})[^:\n]*:\s+(?!OK\b)[A-Z_]+", text):
         return True
     if command.startswith(("stress", "selftest")):
         if re.search(r"\bfail(?:ures)?\s*[=:]\s*[1-9]\d*", text, re.IGNORECASE):
             return True
         if re.search(r"\bErrors:\s*[1-9]\d*", text):
             return True
+    if command in {"help", "?", "version", "ver"}:
+        return False
     return False
 
 
@@ -176,7 +208,7 @@ def prompt_line(prompt: str) -> str:
 class HilRun:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.output_dir = Path(args.output_dir) / f"mcp45hvx1_{timestamp}"
         self.output_dir.mkdir(parents=True, exist_ok=False)
         self.raw_parts: list[str] = []
@@ -238,8 +270,10 @@ class HilRun:
             self.run_command(cli, address_command(self.args.address), "safe")
         self.run_command(cli, "probe", "safe")
         self.run_command(cli, "cfg", "safe")
+        self.run_command(cli, "settings", "safe")
         self.run_command(cli, "state", "safe")
         self.run_command(cli, "drv", "safe")
+        self.run_command(cli, "health", "safe")
         self.run_command(cli, "readwiper", "safe")
         self.run_command(cli, "readtcon", "safe")
         self.run_command(cli, "dump", "safe")
@@ -255,6 +289,9 @@ class HilRun:
         wiper_value = parse_hex_field(wiper.output, "wiper")
         tcon_value = parse_hex_field(tcon.output, "tcon")
         resolution = parse_resolution(state.output)
+        if wiper.failed or tcon.failed or state.failed:
+            self.skipped.append("output-changing group skipped because baseline commands failed")
+            return False
         if wiper_value is None or tcon_value is None:
             self.skipped.append("output-changing group skipped because Wiper/TCON baseline could not be parsed")
             return False
@@ -322,6 +359,8 @@ class HilRun:
         self.final_state.update({"wiper": final_wiper, "tcon": final_tcon})
         if final_wiper != self.baseline["wiper"] or final_tcon != self.baseline["tcon"]:
             self.restore_uncertain = True
+        self.run_command(cli, "state", group)
+        self.run_command(cli, "drv", group)
 
     def general_call_sequence(self, cli: SerialCli) -> None:
         warning = (
@@ -335,16 +374,21 @@ class HilRun:
             return
         if self.args.operator_prompts:
             answer = prompt_line(
-                "Type ISOLATED to confirm only MCP45HVX1 validation devices are on this I2C bus: "
+                "Type ISOLATED_SAFE to confirm only MCP45HVX1 validation devices are on this I2C bus "
+                "and a safe load/measurement setup is connected: "
             )
-            if answer != "ISOLATED":
-                self.skipped.append("General Call skipped: operator did not confirm isolated bus")
+            if answer != "ISOLATED_SAFE":
+                self.skipped.append(
+                    "General Call skipped: operator did not confirm isolated bus and safe load"
+                )
                 return
         if not self.baseline and not self.capture_baseline(cli):
             return
         self.run_command(cli, "errata", "general-call")
-        self.run_command(cli, "gc arm", "general-call", True, required_flags="--include-general-call --confirm-isolated-bus")
-        self.run_command(cli, "gc inc", "general-call", True, required_flags="--include-general-call --confirm-isolated-bus")
+        self.run_command(cli, "gc arm", "general-call", True,
+                         required_flags="--include-general-call --confirm-isolated-bus --operator-prompts")
+        self.run_command(cli, "gc inc", "general-call", True,
+                         required_flags="--include-general-call --confirm-isolated-bus --operator-prompts")
         self.run_command(cli, "readwiper", "general-call-verify")
         if self.args.operator_prompts:
             measured = prompt_line("Record analog measurement after General Call increment: ")
@@ -382,14 +426,23 @@ class HilRun:
             return FAIL_RESTORE_UNCERTAIN
         if self.runner_errors:
             return FAIL
+        unsafe_skip_tokens = (
+            "General Call",
+            "SHDN",
+            "WLAT",
+            "output-changing",
+            "--include-output-change",
+            "--include-general-call",
+        )
+        if self.skipped and any(any(token in item for token in unsafe_skip_tokens)
+                                for item in self.skipped):
+            return SKIPPED_UNSAFE
         if not self.commands:
             return FAIL
         if any(result.failed for result in self.commands):
             return FAIL
         if final_bad:
             return FAIL
-        if self.skipped and any("General Call" in item or "SHDN" in item or "WLAT" in item for item in self.skipped):
-            return SKIPPED_UNSAFE
         output_changed = any(result.output_changing for result in self.commands)
         if self.operator_review_required:
             return OPERATOR_REVIEW_REQUIRED
@@ -672,7 +725,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", required=True, help="Serial port, for example COM15 or /dev/ttyUSB0")
     parser.add_argument("--baud", type=int, default=115200, help="Serial baud rate")
     parser.add_argument("--address", type=parse_address, help="Expected MCP45HVX1 7-bit address")
-    parser.add_argument("--timeout", type=float, default=10.0, help="Base per-command timeout in seconds")
+    parser.add_argument("--timeout", type=parse_positive_float, default=10.0,
+                        help="Base per-command timeout in seconds")
     parser.add_argument("--output-dir", default="hil_logs", help="Base output directory")
     parser.add_argument("--no-color", action="store_true", help="Strip ANSI color from captured outputs")
     parser.add_argument("--include-output-change", action="store_true", help="Run local Wiper output-changing checks")
@@ -688,6 +742,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def validate_args(args: argparse.Namespace) -> list[str]:
     warnings: list[str] = []
+    if args.include_output_change and not args.operator_prompts:
+        warnings.append(
+            "--include-output-change requires --operator-prompts for safe-load "
+            "confirmation and will be recorded as skipped"
+        )
+        args.include_output_change = False
+    if args.include_general_call and not args.operator_prompts:
+        warnings.append(
+            "--include-general-call requires --operator-prompts for safe-load "
+            "and isolated-bus confirmation and will be recorded as skipped"
+        )
+        args.include_general_call = False
     if args.include_wiper_ramp and not args.include_output_change:
         warnings.append("--include-wiper-ramp ignored because --include-output-change was not provided")
         args.include_wiper_ramp = False

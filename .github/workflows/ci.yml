@@ -82,6 +82,9 @@ jobs:
       - name: Check generated artifacts
         run: python tools/check_generated_artifacts.py
 
+      - name: Test HIL evidence parser
+        run: python tools/test_run_hil_mcp45hvx1_parser.py
+
       - name: Run native tests
         run: pio test -e native
 
