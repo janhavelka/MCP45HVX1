@@ -46,6 +46,20 @@ REQUIRED_NATIVE_TOKENS = [
     "i2c_new_master_bus",
 ]
 
+CI_REQUIRED_TOKENS = [
+    "workflow_dispatch:",
+    "idf-build:",
+    "uses: espressif/esp-idf-ci-action@v1",
+    "esp_idf_version: v6.0.1",
+    "target: ${{ matrix.target }}",
+    "path: examples/espidf_basic",
+    "command: idf.py set-target ${{ matrix.target }} build",
+    "actions/upload-artifact@v4",
+    "esp-idf-build-logs-${{ matrix.target }}",
+    "esp32s3",
+    "esp32s2",
+]
+
 IDF_COMMAND_ACTIONS = {
     "scan": "scanBus",
     "color": "styleSetEnabled",
@@ -139,6 +153,13 @@ def main() -> int:
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     text = main_path.read_text(encoding="utf-8", errors="replace")
     cmake = cmake_path.read_text(encoding="utf-8", errors="replace")
+    ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    for token in CI_REQUIRED_TOKENS:
+        require_token(ci_text, token, "GitHub Actions ESP-IDF CI")
 
     for path in (ROOT / "examples" / "espidf_basic").rglob("*"):
         if path.is_file() and (

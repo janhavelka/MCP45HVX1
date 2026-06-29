@@ -7,6 +7,7 @@ on:
       - "v*"
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -85,6 +86,9 @@ jobs:
       - name: Test HIL evidence parser
         run: python tools/test_run_hil_mcp45hvx1_parser.py
 
+      - name: Run HIL runner parser self-test
+        run: python tools/run_hil_mcp45hvx1.py --parser-self-test
+
       - name: Run native tests
         run: pio test -e native
 
@@ -137,4 +141,14 @@ jobs:
           esp_idf_version: v6.0.1
           target: ${{ matrix.target }}
           path: examples/espidf_basic
-          command: idf.py build
+          command: idf.py set-target ${{ matrix.target }} build
+
+      - name: Upload ESP-IDF build logs for ${{ matrix.target }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp-idf-build-logs-${{ matrix.target }}
+          path: |
+            examples/espidf_basic/build/**/*.log
+            examples/espidf_basic/build/log/**
+          if-no-files-found: ignore

@@ -32,6 +32,8 @@ def make_args(output_dir: str, **overrides: object) -> Namespace:
         "idle_timeout_s": 0.35,
         "boot_settle_s": 0.0,
         "command_pacing_s": 0.0,
+        "serial_dtr": "on",
+        "serial_rts": "off",
         "stress_count": 100,
         "stress_timeout_s": 25.0,
         "benchmark_samples": 0,
@@ -119,6 +121,15 @@ class EmptyCli(FakeCli):
         return ""
 
 
+class RaisingSerial:
+    def write(self, data: bytes) -> int:
+        del data
+        raise TimeoutError("write stalled")
+
+    def flush(self) -> None:
+        return None
+
+
 class HilParserTests(unittest.TestCase):
     def test_command_failed_detects_common_failure_tokens(self) -> None:
         self.assertTrue(hil.command_failed("probe", "[FAIL] probe\n"))
@@ -165,6 +176,17 @@ class HilParserTests(unittest.TestCase):
         self.assertTrue(any(result.failed for result in run.commands))
         self.assertEqual(hil.FAIL, run.verdict())
 
+    def test_serial_write_exception_is_reported_as_command_output(self) -> None:
+        cli = object.__new__(hil.SerialCli)
+        cli._serial = RaisingSerial()
+        cli._timeout = 1.0
+        cli._idle_timeout = 0.35
+
+        output = cli.command("version")
+
+        self.assertIn("[E] serial command failed", output)
+        self.assertIn("TimeoutError", output)
+
     def test_report_generation_does_not_false_pass_failed_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             args = make_args(tmp)
@@ -197,6 +219,19 @@ class HilParserTests(unittest.TestCase):
         self.assertGreater(summary["result_counts"][hil.NOT_RUN], 0)
         self.assertIn("Detailed Steps", report)
 
+    def test_partial_soak_summary_records_failure_burst(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(tmp, soak_duration_s=60.0, max_failure_burst=2)
+            run = hil.HilRun(args)
+            cli = EmptyCli()
+
+            run.soak_sequence(cli)
+
+        self.assertTrue(run.soak_summary["requested"])
+        self.assertEqual(2, run.soak_summary["failures"])
+        self.assertIn("2 consecutive failures", run.soak_summary["stopped_reason"])
+        self.assertEqual(hil.FAIL, run.verdict())
+
     def test_output_change_requires_operator_prompts_for_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             args = make_args(
@@ -219,6 +254,17 @@ class HilParserTests(unittest.TestCase):
         for value in ("0", "-1", "nan", "inf"):
             with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
                 parser.parse_args(["--port", "TEST", "--timeout", value])
+
+    def test_serial_line_defaults_and_choices_are_bounded(self) -> None:
+        parser = hil.build_parser()
+        args = parser.parse_args(["--port", "TEST"])
+        self.assertEqual("on", args.serial_dtr)
+        self.assertEqual("off", args.serial_rts)
+        args = parser.parse_args(["--port", "TEST", "--serial-dtr", "unchanged", "--serial-rts", "on"])
+        self.assertEqual("unchanged", args.serial_dtr)
+        self.assertEqual("on", args.serial_rts)
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            parser.parse_args(["--port", "TEST", "--serial-dtr", "bad"])
 
     def test_general_call_requires_operator_prompts_for_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

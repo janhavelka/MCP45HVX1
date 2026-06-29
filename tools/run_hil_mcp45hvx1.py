@@ -148,7 +148,15 @@ def import_serial() -> Any:
 
 
 class SerialCli:
-    def __init__(self, port: str, baud: int, timeout: float, idle_timeout: float) -> None:
+    def __init__(
+        self,
+        port: str,
+        baud: int,
+        timeout: float,
+        idle_timeout: float,
+        serial_dtr: str = "on",
+        serial_rts: str = "off",
+    ) -> None:
         serial = import_serial()
         self._serial = serial.Serial(
             port=port,
@@ -158,10 +166,15 @@ class SerialCli:
             rtscts=False,
             dsrdtr=False,
         )
-        self._serial.dtr = False
-        self._serial.rts = False
+        self.apply_line_state("dtr", serial_dtr)
+        self.apply_line_state("rts", serial_rts)
         self._timeout = timeout
         self._idle_timeout = idle_timeout
+
+    def apply_line_state(self, name: str, value: str) -> None:
+        if value == "unchanged":
+            return
+        setattr(self._serial, name, value == "on")
 
     def close(self) -> None:
         self._serial.close()
@@ -194,9 +207,12 @@ class SerialCli:
         return b"".join(chunks).decode("utf-8", errors="replace")
 
     def command(self, command: str, timeout: float | None = None) -> str:
-        self._serial.write((command + "\n").encode("utf-8"))
-        self._serial.flush()
-        return self.read_until_quiet(timeout=timeout, quiet_s=self._idle_timeout)
+        try:
+            self._serial.write((command + "\n").encode("utf-8"))
+            self._serial.flush()
+            return self.read_until_quiet(timeout=timeout, quiet_s=self._idle_timeout)
+        except Exception as exc:
+            return f"[E] serial command failed: {type(exc).__name__}: {exc}\n"
 
 
 def command_failed(command: str, output: str) -> bool:
@@ -638,9 +654,11 @@ class HilRun:
         consecutive_failures = 0
         worst_latency = 0.0
         loop_index = 0
+        stopped_reason = ""
 
         while time.monotonic() < deadline:
             if max_commands > 0 and sum(command_counts.values()) >= max_commands:
+                stopped_reason = "max command limit reached"
                 break
             command = SOAK_COMMANDS[loop_index % len(SOAK_COMMANDS)]
             loop_index += 1
@@ -653,9 +671,8 @@ class HilRun:
                 failures += 1
                 consecutive_failures += 1
                 if consecutive_failures >= self.args.max_failure_burst:
-                    self.runner_errors.append(
-                        f"soak stopped after {consecutive_failures} consecutive failures"
-                    )
+                    stopped_reason = f"soak stopped after {consecutive_failures} consecutive failures"
+                    self.runner_errors.append(stopped_reason)
                     break
             else:
                 consecutive_failures = 0
@@ -677,8 +694,11 @@ class HilRun:
             "mean_latency_s": round(mean, 3) if latencies else None,
             "max_latency_s": round(worst_latency, 3) if latencies else None,
             "effective_hz": round((attempts - failures) / elapsed, 3) if elapsed > 0 else 0.0,
-            "completed_requested_duration": time.monotonic() >= deadline and not self.runner_errors,
+            "completed_requested_duration": (
+                time.monotonic() >= deadline and failures == 0 and not stopped_reason
+            ),
             "max_commands_limit": max_commands,
+            "stopped_reason": stopped_reason,
         }
         self.run_command(cli, "state", "soak-final", feature_area="8-hour soak")
         self.run_command(cli, "drv", "soak-final", feature_area="8-hour soak")
@@ -830,7 +850,8 @@ class HilRun:
             f"{utc_now()} EVENT runner=tools/run_hil_mcp45hvx1.py\n"
             f"{utc_now()} EVENT argv={' '.join(sys.argv)}\n"
             f"{utc_now()} EVENT port={args.port or 'NOT_SET'} baud={args.baud} "
-            f"address={format_hex(args.address) if args.address is not None else 'default'}\n"
+            f"address={format_hex(args.address) if args.address is not None else 'default'} "
+            f"dtr={getattr(args, 'serial_dtr', 'on')} rts={getattr(args, 'serial_rts', 'off')}\n"
         )
         raw_serial = raw_header + "".join(self.raw_parts).lstrip()
         (self.output_dir / "raw_serial.txt").write_text(raw_serial, encoding="utf-8")
@@ -858,6 +879,8 @@ class HilRun:
                 "baud": args.baud,
                 "address": format_hex(args.address) if args.address is not None else None,
                 "timeout_s": args.timeout,
+                "dtr": getattr(args, "serial_dtr", "on"),
+                "rts": getattr(args, "serial_rts", "off"),
             },
             "options": {
                 "no_color": bool(args.no_color),
@@ -866,6 +889,8 @@ class HilRun:
                 "boot_settle_s": getattr(args, "boot_settle_s", 0.0),
                 "idle_timeout_s": getattr(args, "idle_timeout_s", 0.35),
                 "command_pacing_s": getattr(args, "command_pacing_s", 0.0),
+                "serial_dtr": getattr(args, "serial_dtr", "on"),
+                "serial_rts": getattr(args, "serial_rts", "off"),
                 "benchmark_samples": getattr(args, "benchmark_samples", 0),
                 "soak_duration_s": getattr(args, "soak_duration_s", 0.0),
                 "soak_max_commands": getattr(args, "soak_max_commands", 0),
@@ -1118,6 +1143,7 @@ class HilRun:
                 f"- Worst latency: `{soak.get('max_latency_s')}` seconds",
                 f"- Effective rate: `{soak.get('effective_hz')}` Hz",
                 f"- Completed requested duration: `{soak.get('completed_requested_duration')}`",
+                f"- Stopped reason: `{soak.get('stopped_reason') or '-'}`",
                 f"- Command mix: `{json.dumps(soak.get('command_counts', {}), sort_keys=True)}`",
             ])
         else:
@@ -1187,6 +1213,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Wait after opening serial before reading boot text")
     parser.add_argument("--command-pacing-s", type=parse_nonnegative_float, default=0.0,
                         help="Delay before each command write")
+    parser.add_argument("--serial-dtr", choices=("on", "off", "unchanged"), default="on",
+                        help="DTR line state after opening serial; USB CDC boards often require on")
+    parser.add_argument("--serial-rts", choices=("on", "off", "unchanged"), default="off",
+                        help="RTS line state after opening serial")
     parser.add_argument("--stress-count", type=parse_nonnegative_int, default=100,
                         help="Read-only stress count for the safe sequence")
     parser.add_argument("--stress-timeout-s", type=parse_positive_float, default=25.0,
@@ -1282,7 +1312,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cli: SerialCli | None = None
     try:
-        cli = SerialCli(args.port, args.baud, args.timeout, args.idle_timeout_s)
+        cli = SerialCli(
+            args.port,
+            args.baud,
+            args.timeout,
+            args.idle_timeout_s,
+            args.serial_dtr,
+            args.serial_rts,
+        )
         run.safe_sequence(cli)
         if args.include_output_change:
             run.output_change_sequence(cli)
