@@ -29,6 +29,22 @@ def make_args(output_dir: str, **overrides: object) -> Namespace:
         "baud": 115200,
         "address": None,
         "timeout": 1.0,
+        "idle_timeout_s": 0.35,
+        "boot_settle_s": 0.0,
+        "command_pacing_s": 0.0,
+        "stress_count": 100,
+        "stress_timeout_s": 25.0,
+        "benchmark_samples": 0,
+        "soak_duration_s": 0.0,
+        "soak_max_commands": 0,
+        "max_failure_burst": 3,
+        "dry_run": False,
+        "parser_self_test": False,
+        "report_file": None,
+        "board": "",
+        "environment": "",
+        "fixture_note": "",
+        "safety_assumption": "",
         "output_dir": output_dir,
         "no_color": True,
         "include_output_change": False,
@@ -67,8 +83,20 @@ class FakeCli:
             return "state=READY initialized=1 online=1 uncertain=0 dirty=0\n> "
         if command in {"drv", "health"}:
             return "health state=READY initialized=1 online=1 uncertain=0 dirty=0\n> "
+        if command == "version":
+            return "MCP45HVX1 CLI version test\n> "
+        if command == "help":
+            return "scan\nprobe\nstress\n> "
         if command in {"cfg", "settings"}:
             return f"{command}: OK\naddr=0x3C resolution=8\n> "
+        if command in {"info", "errata", "read", "reg 0x00", "reg 0x04", "last", "recover"}:
+            return f"{command}: OK\n> "
+        if command == "invalid_command":
+            return "Unknown command: invalid_command\n> "
+        if command == "reg 0x01":
+            return "reg: INVALID_PARAM\n> "
+        if command == "addr 0x60":
+            return "addr: INVALID_PARAM\n> "
         if command == "readwiper":
             return "readwiper: OK\nwiper=0x7F\n> "
         if command == "readtcon":
@@ -105,9 +133,14 @@ class HilParserTests(unittest.TestCase):
         self.assertTrue(hil.command_failed("probe", hil.OUTPUT_TRUNCATED_MARKER))
         self.assertTrue(hil.command_failed("settings", "settings: I2C_BUS\n"))
         self.assertTrue(hil.command_failed("health", "health: BUSY\n"))
+        self.assertTrue(hil.command_failed("reg 0x01", "reg: INVALID_PARAM\n"))
+        self.assertTrue(hil.command_failed("addr 0x60", "addr: INVALID_PARAM\n"))
         self.assertTrue(hil.command_failed("stress 100", "stress ok=99 failures=1\n"))
         self.assertFalse(hil.command_failed("settings", "settings: OK\n"))
         self.assertFalse(hil.command_failed("health", "health: OK\n"))
+
+    def test_parser_self_test_passes(self) -> None:
+        self.assertTrue(hil.run_parser_self_test())
 
     def test_safe_sequence_covers_common_minimum_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +180,22 @@ class HilParserTests(unittest.TestCase):
         self.assertEqual(hil.FAIL, summary["verdict"])
         self.assertIn("command failed or produced error output: settings", summary["verdict_reasons"])
         self.assertIn("Verdict: `FAIL`", report)
+
+    def test_dry_run_writes_unknown_plan_and_limitations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = make_args(tmp, port=None, dry_run=True)
+            run = hil.HilRun(args)
+
+            run.dry_run_sequence()
+            run.write_outputs(args)
+
+            summary = json.loads((run.output_dir / "summary.json").read_text(encoding="utf-8"))
+            report = (run.output_dir / "report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(hil.UNKNOWN, summary["verdict"])
+        self.assertGreater(summary["result_counts"][hil.UNKNOWN], 0)
+        self.assertGreater(summary["result_counts"][hil.NOT_RUN], 0)
+        self.assertIn("Detailed Steps", report)
 
     def test_output_change_requires_operator_prompts_for_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

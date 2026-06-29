@@ -22,6 +22,17 @@ uint8_t boundedSub(uint8_t value, uint8_t delta) {
   return delta > value ? 0 : static_cast<uint8_t>(value - delta);
 }
 
+Status validateRegisterReadback(uint8_t reg, uint8_t value, Resolution resolution) {
+  if (reg == cmd::REG_WIPER0 && value > MCP45HVX1::maxWiperCode(resolution)) {
+    return Status::Error(Err::REGISTER_MISMATCH,
+                         "Wiper readback exceeds configured resolution", value);
+  }
+  if (reg == cmd::REG_TCON0 && (value & cmd::TCON_RESERVED_MASK) != cmd::TCON_RESERVED_MASK) {
+    return Status::Error(Err::REGISTER_MISMATCH, "TCON reserved bits are not high", value);
+  }
+  return Status::Ok();
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -1058,7 +1069,12 @@ Status MCP45HVX1::_readRegisterRaw(uint8_t reg, uint8_t& value) {
     return Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                          rx[cmd::READ_MSB_INDEX]);
   }
-  value = rx[cmd::READ_LSB_INDEX];
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  st = validateRegisterReadback(reg, readback, _config.resolution);
+  if (!st.ok()) {
+    return st;
+  }
+  value = readback;
   _addressPointerKnown = true;
   _addressPointer = reg;
   return Status::Ok();
@@ -1082,11 +1098,16 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
     return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                                         rx[cmd::READ_MSB_INDEX]));
   }
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  Status readbackStatus = validateRegisterReadback(reg, readback, _config.resolution);
+  if (!readbackStatus.ok()) {
+    return _recordFailure(readbackStatus);
+  }
   st = _updateHealth(st);
   if (!st.ok()) {
     return st;
   }
-  value = rx[cmd::READ_LSB_INDEX];
+  value = readback;
   _addressPointerKnown = true;
   _addressPointer = reg;
   return Status::Ok();
@@ -1105,14 +1126,24 @@ Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
     return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                                         rx[cmd::READ_MSB_INDEX]));
   }
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
+    Status readbackStatus = validateRegisterReadback(_addressPointer, readback,
+                                                     _config.resolution);
+    if (!readbackStatus.ok()) {
+      return _recordFailure(readbackStatus);
+    }
+  }
   st = _updateHealth(st);
   if (!st.ok()) {
     return st;
   }
-  value = rx[cmd::READ_LSB_INDEX];
   if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
+    value = readback;
     _syncRegister(_addressPointer, value);
     _markRegisterReadbackVerified(_addressPointer);
+  } else {
+    value = readback;
   }
   return Status::Ok();
 }

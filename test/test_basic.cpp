@@ -2052,6 +2052,77 @@ void test_read_msb_mismatch_is_reported() {
                           static_cast<uint8_t>(st.code));
 }
 
+void test_hv31_wiper_readback_exceeding_resolution_is_rejected() {
+  {
+    FakeBus bus;
+    bus.resolution = Resolution::Bits7;
+    bus.wiper = 0x80;
+    Driver dev;
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_FALSE(dev.isInitialized());
+  }
+
+  FakeBus bus;
+  bus.resolution = Resolution::Bits7;
+  bus.wiper = cmd::WIPER_DEFAULT_7BIT;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.wiper = 0x80;
+  bus.nowMs = 3100;
+  uint8_t value = 0xAA;
+  Status st = dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0xAA, value);
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(3100u, dev.lastErrorMs());
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedWiperKnown);
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_7BIT, snap.cachedWiper);
+}
+
+void test_tcon_readback_reserved_bits_must_be_high() {
+  {
+    FakeBus bus;
+    bus.tcon = 0x07;
+    Driver dev;
+    Status st = dev.begin(makeConfig(bus));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_FALSE(dev.isInitialized());
+  }
+
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.tcon = 0x07;
+  bus.nowMs = 3200;
+  uint8_t value = 0xAA;
+  Status st = dev.readTcon(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_HEX8(0xAA, value);
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(3200u, dev.lastErrorMs());
+
+  SettingsSnapshot snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, snap.cachedTcon);
+
+  st = dev.readLastAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::REGISTER_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(2u, dev.totalFailures());
+  snap = dev.getSettings();
+  TEST_ASSERT_TRUE(snap.cachedTconKnown);
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, snap.cachedTcon);
+}
+
 void test_tracked_read_msb_mismatch_updates_health() {
   FakeBus bus;
   Driver dev;
@@ -2381,6 +2452,8 @@ int main() {
   RUN_TEST(test_failed_recover_from_offline_reasserts_latch_after_partial_success);
   RUN_TEST(test_offline_threshold_zero_normalizes_to_one);
   RUN_TEST(test_read_msb_mismatch_is_reported);
+  RUN_TEST(test_hv31_wiper_readback_exceeding_resolution_is_rejected);
+  RUN_TEST(test_tcon_readback_reserved_bits_must_be_high);
   RUN_TEST(test_tracked_read_msb_mismatch_updates_health);
   RUN_TEST(test_require_read_msb_zero_can_be_disabled);
   RUN_TEST(test_zero_step_commands_are_noops);
