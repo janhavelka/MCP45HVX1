@@ -6,11 +6,13 @@ validation evidence.
 
 ## Release Readiness
 
-The library is a pre-production candidate pending hardware validation. Software
-tests and static guards can verify transport framing, status propagation, cache
-behavior, and CLI contracts. They cannot prove analog accuracy, high-voltage
-safety, WLAT/SHDN physical output behavior, or General Call safety on a shared
-bus.
+The library is a v1.0.0 pre-production software package. Software tests,
+static guards, and the bundled ESP32-S2 safe-only HIL reports verify transport
+framing, status propagation, cache behavior, CLI contracts, and safe/read-only
+CLI behavior on the recorded fixture. They cannot prove output-changing analog
+behavior, analog accuracy, high-voltage safety, WLAT/SHDN physical output
+behavior, rail-cycle behavior, fault recovery on a physical fault fixture, or
+General Call safety on a shared bus.
 
 ## Transport Ownership
 
@@ -114,6 +116,37 @@ the original error and preserves enough runtime state for `readWiper()`,
 - If recovery starts from OFFLINE and later fails, the OFFLINE latch is
   restored.
 
+## State, Snapshots, And Helpers
+
+- `readSnapshot(RegisterSnapshot&)` reads Wiper then TCON and updates the
+  caller snapshot only after both reads succeed.
+- `getSettings()` and `getSettings(SettingsSnapshot&)` expose the active
+  copied config, lifecycle state, cache-known flags, address-pointer knowledge,
+  health counters, and hardware-uncertainty status without issuing I2C traffic.
+- `getConfig()` returns the active copied `Config`; callback pointers and user
+  contexts remain non-owning.
+- `state()` and `driverState()` return the same `DriverState`.
+- `isInitialized()` reports whether runtime config/transport state is retained.
+  A failed optional startup write may leave this true for diagnostics.
+- `isOnline()` reports READY or DEGRADED. OFFLINE blocks normal bus-touching
+  APIs until recovery.
+- `lastOkMs()`, `lastErrorMs()`, `lastError()`, `consecutiveFailures()`,
+  `totalFailures()`, and `totalSuccess()` expose tracked health information.
+- `getDeviceInfo()` reports active address, configured resolution and RAB,
+  max/default Wiper code, nominal resistance, ideal step, terminal-current
+  limit, and alternate-address-range use.
+- `siliconErrataInfo()` returns static DS80000649B release-gate information for
+  CLI diagnostics and documentation; it is not proof that any physical silicon
+  lot is unaffected.
+- `maxWiperCode()`, `defaultWiperCode()`, `nominalResistanceOhms()`,
+  `stepResistanceOhms()`, `maxTerminalCurrentMilliAmps()`,
+  `resistanceBToWOhms()`, and `resistanceAToWOhms()` are static helper math or
+  datasheet-limit helpers. Resistance helpers are ideal and exclude tolerance,
+  wiper resistance, leakage, INL/DNL, temperature, and board loading.
+- `sanitizeTcon()` forces reserved TCON bits `[7:4]` high before writes.
+- `decodeTcon()` decodes a TCON byte into terminal bits and a best-fit terminal
+  mode.
+
 ## Poll-Chunked Jobs
 
 The core exposes an explicit job API for applications that need bounded I2C
@@ -127,6 +160,8 @@ work per owner-task poll:
 - `startRecoverJob()`
 - `pollJob(nowMs, maxInstructions)`
 - `getJobSnapshot()`
+- `getJobSnapshot(JobSnapshot&)`
+- `jobActive()`
 
 One register read or command-write chunk is one instruction. Snapshot jobs read
 Wiper and TCON as separate instructions. Terminal jobs expose the TCON

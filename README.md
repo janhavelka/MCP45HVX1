@@ -5,9 +5,10 @@ potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). This hardening
 branch focuses on industry-readiness software behavior, documentation, tests,
 and evidence gates.
 
-Current release status: pre-production candidate pending hardware validation.
-Software tests and static guards do not prove analog accuracy, high-voltage
-safety, or General Call safety on a shared bus.
+Current release status: v1.0.0 pre-production software package. Local software
+validation and an ESP32-S2 safe-only HIL run have passed, but this is not a
+production-readiness, analog-accuracy, high-voltage-safety, or General Call
+safety claim.
 
 ## Features
 
@@ -62,9 +63,10 @@ sources or compatibility facades.
 Software validation status: command parity is checked by repo-local contract
 scripts. The pure ESP-IDF build is configured in CI; local `idf.py` may be
 absent on developer machines, so local IDF build success must not be claimed
-unless an actual `idf.py` log is recorded. Hardware smoke tests are still
-pending until target devices are available, and no high-voltage validation is
-claimed without measurement logs.
+unless an actual `idf.py` log is recorded. The latest bundled HIL evidence is a
+safe-only ESP32-S2 Arduino/PlatformIO CLI run; pure ESP-IDF hardware smoke,
+output-changing, analog, high-voltage, and General Call validation remain
+separate evidence gates.
 
 ## Quick Start
 
@@ -124,10 +126,17 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `Status recover()` - tracked Wiper/TCON reads to refresh cache, clear verified uncertainty, and return READY only after both reads succeed
 - `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback without proving device READY
 - `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
+- `Status readSnapshot(RegisterSnapshot& snapshot)` - read Wiper then TCON and publish the caller snapshot only after both reads succeed
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
+- `Status getSettings(SettingsSnapshot& out)` - output-parameter snapshot form matching sibling drivers
+- `DriverState state()` / `driverState()` - current health state
+- `bool isInitialized()` / `isOnline()` - lifecycle and health convenience checks
+- `const Config& getConfig()` - active copied configuration
 - `bool hardwareStateUncertain()` - true after an ambiguous state-changing write failure until readback verifies affected state
 - `Status hardwareStateUncertainError()` - last ambiguous failure that set hardware uncertainty
 - `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, terminal-current limit, defaults
+- `SiliconErrataInfo siliconErrataInfo()` - static DS80000649B errata summary for diagnostics and release gates
+- `lastOkMs()`, `lastErrorMs()`, `lastError()`, `consecutiveFailures()`, `totalFailures()`, `totalSuccess()` - tracked health counters and timestamps
 
 ### Poll-Chunked Jobs
 
@@ -142,6 +151,8 @@ work can also be driven as explicit jobs:
 - `Status startRecoverJob()`
 - `Status pollJob(uint32_t nowMs, uint8_t maxInstructions)`
 - `JobSnapshot getJobSnapshot()`
+- `Status getJobSnapshot(JobSnapshot& out)`
+- `bool jobActive()`
 
 A register read or command-write chunk is counted as one instruction.
 `startReadSnapshotJob()` reads Wiper then TCON as separate instructions.
@@ -167,6 +178,7 @@ both Wiper and TCON readback instructions succeed.
 - `float fractionFromCode(uint8_t code, Resolution resolution)`
 - `Status readWiperFraction(float& fraction)`
 - `Status writeWiperFraction(float fraction)` - rejects values outside `0.0..1.0`
+- `maxWiperCode()`, `defaultWiperCode()`, `nominalResistanceOhms()` - variant and ordering helpers
 - `stepResistanceOhms()`, `resistanceBToWOhms()`, `resistanceAToWOhms()` - ideal helper math only
 - `maxTerminalCurrentMilliAmps()` - datasheet terminal-current limit by RAB option
 
@@ -188,6 +200,7 @@ out-of-range values.
 - `Status getTerminalMode(TerminalMode& mode)`
 - `Status readTerminalStatus(TerminalStatus& status)`
 - `TerminalStatus decodeTcon(uint8_t value)`
+- `uint8_t sanitizeTcon(uint8_t value)` - force reserved TCON bits `[7:4]` high before writes
 
 `TerminalMode::Custom` is returned for valid TCON bit combinations that do not
 match a named preset. It is a decoded state, not a valid argument to
@@ -514,6 +527,20 @@ the resulting evidence bundle is attached to the release or validation record.
 The HIL runner is repository tooling and is excluded from normal PlatformIO
 package exports; use the full repository when capturing HIL evidence.
 
+Current bundled safe-only evidence:
+
+- [8-hour ESP32-S2 safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md):
+  `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency
+  `0.188 s`, no output-changing groups requested.
+- [1-hour panic-repro safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md):
+  `PASS_SAFE_ONLY`, `23056 / 23056 / 0` soak commands.
+
+These reports support safe/read-only CLI behavior on the recorded fixture only.
+They do not support analog movement, terminal-current, high-voltage, SHDN/WLAT,
+rail-cycle, fault-injection, or General Call safety claims.
+The report markdown files are repository/release-source evidence and are not
+included in the normal PlatformIO package archive.
+
 ## Running Tests
 
 The repository `platformio.ini` pins ESP32 example builds to pioarduino
@@ -522,6 +549,7 @@ framework; applications that consume this library through `lib_deps` do not need
 to add a separate `Wire` dependency.
 
 ```bash
+python tools/validate.py
 python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
@@ -545,9 +573,10 @@ idf.py build
 include headers, source, examples, metadata, and current core docs. Large
 reference PDFs, extracted datasheet markdown, tests, tools, CI metadata, and
 local build output are intentionally excluded from normal packages to keep the
-install artifact focused and reproducible. HIL tooling is also repo-only. The
-full reference corpus and release-preparation tooling remain in the repository
-for audit, documentation, validation, and release work.
+install artifact focused and reproducible. HIL tooling and generated HIL report
+markdown under `docs/reports/` are also repo-only. The full reference corpus
+and release-preparation tooling remain in the repository for audit,
+documentation, validation, and release work.
 
 ## Documentation
 
@@ -558,6 +587,7 @@ for audit, documentation, validation, and release work.
 - <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
 - <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
+- <a href="docs/RELEASE_NOTES_v1.0.0.md">v1.0.0 Release Notes</a>
 - <a href="docs/IDF_PORT.md">ESP-IDF Port</a>
 - <a href="docs/HARDENING_SUMMARY.md">Hardening Summary</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,

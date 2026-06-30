@@ -38,6 +38,20 @@ Complete this header for each validation run:
 | HIL groups enabled | safe-only / output-change / SHDN / WLAT / General Call |
 | General Call isolation confirmation | Pending / not applicable |
 
+## Recorded Safe-Only Evidence
+
+The repository includes safe-only HIL evidence for the current v1.0.0
+pre-production software package:
+
+| Run | Evidence | Result |
+|---|---|---|
+| 8-hour ESP32-S2 COM8 soak | [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md) | `PASS_SAFE_ONLY`; `183221 / 183221 / 0` soak commands; worst latency `0.188 s` |
+| 1-hour ESP32-S2 COM8 panic repro | [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md) | `PASS_SAFE_ONLY`; `23056 / 23056 / 0` soak commands |
+
+These runs exercised safe/read-only CLI paths only. They do not complete the
+output-changing, analog measurement, high-voltage, SHDN/WLAT, address strap,
+rail-cycle, fault-injection, or General Call gates below.
+
 ## Safety Prerequisites
 
 - Validate at low voltage before any high-voltage rail or final-load test.
@@ -54,7 +68,9 @@ Complete this header for each validation run:
 
 ## Safe Read-Only Checks
 
-These checks must not intentionally change analog output:
+These checks must not intentionally change analog output. The table is a
+reusable per-fixture checklist; for the v1.0.0 COM8 evidence, see
+[`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md).
 
 | Check | Expected evidence | Result |
 |---|---|---|

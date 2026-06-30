@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 1.0.0 - 2026-06-30
+
 - Documented the current status as a pre-production candidate pending hardware
   validation; no production, hardware-validation, high-voltage, analog
   accuracy, General Call safety, or release-readiness claim is made without
@@ -33,11 +37,17 @@
 - Added HIL evidence tooling in `tools/run_hil_mcp45hvx1.py` with safe
   read-only defaults, explicit output-changing opt-ins, General Call isolated
   bus gating, SHDN/WLAT operator prompts, restore checks, and attachable
-  evidence bundles. No hardware HIL transcript is bundled.
+  evidence bundles.
+- Added bundled safe-only ESP32-S2 HIL evidence: one 1-hour panic-repro run and
+  one 8-hour safe-only soak. The 8-hour run finished `PASS_SAFE_ONLY` with
+  `183221 / 183221 / 0` soak commands, worst latency `0.188 s`, and final
+  driver state READY with zero failures. Output-changing, General Call, SHDN,
+  WLAT, rail-cycle, fault-injection, analog, and high-voltage checks were not
+  run and remain separate evidence gates.
 - Added GitHub Actions coverage for ESP32-S3/ESP32-S2 PlatformIO builds, native
   tests, guard scripts, package validation, version checks, and pure ESP-IDF
-  `esp32s2`/`esp32s3` matrix builds. Remote CI status must still be checked
-  from an actual run before it is cited.
+  `esp32s2`/`esp32s3` matrix builds. The release tag workflow run must be
+  reviewed on GitHub before citing remote CI success for a published release.
 - Added authoritative docs index, API contract, hardware validation template,
   release checklist, ESP-IDF parity report, final hardening report, and final
   docs/release cleanup report.
@@ -48,13 +58,6 @@
 - Simplified `docs/` around maintained API, device reference, IDF, hardware
   validation, release checklist, and hardening summary documents; removed
   prompt-era reports and raw extraction leftovers from the maintained tree.
-- Kept release tag creation pending explicit approval and release-checklist
-  evidence.
-
-## 1.0.0
-
-- Initial framework-neutral MCP45HVX1 driver package.
-- Added injected I2C transport, status/error model, health tracking, register
-  helpers, wiper and TCON APIs, General Call helpers, examples, tests, and docs.
-- Release tag and production-readiness claims remain pending until the release
-  checklist evidence is complete.
+- Prepared the repository for tag `v1.0.0` as a pre-production software
+  package. Production-readiness claims remain blocked until the hardware
+  validation checklist evidence is complete.

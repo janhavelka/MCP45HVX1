@@ -22,14 +22,25 @@ production readiness.
 | Poll jobs | Side-effecting and multi-instruction work has explicit bounded job APIs and instruction accounting. |
 | ESP-IDF example | Native ESP-IDF CLI has bounded parsing, color toggle, real `selftest output`, state/health parity, and contract guards. |
 | Tests and guards | Native fake-bus tests, CLI/IDF contract scripts, core timing guard, version check, generated-artifact guard, package pack, and Arduino S2/S3 builds are part of the release checklist. |
+| Safe-only HIL | ESP32-S2 COM8 safe-only evidence is bundled under `docs/reports/`; the 8-hour run completed `PASS_SAFE_ONLY` with `183221 / 183221 / 0` soak commands and zero detected failures. |
+
+## Completed Evidence
+
+- Local software validation passed with `python tools/validate.py` before the
+  v1.0.0 release-prep documentation pass.
+- Package packing passed with `pio pkg pack` before the v1.0.0 release-prep
+  documentation pass.
+- Safe-only HIL on ESP32-S2/COM8 passed:
+  [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md).
+- A 1-hour panic-repro safe-only HIL run also passed:
+  [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md).
 
 ## Deferred Evidence
 
 These are not software blockers for merge review, but they block release and
-readiness claims:
+readiness claims beyond the safe-only scope:
 
 - local or CI pure ESP-IDF build logs for the release commit
-- hardware/HIL transcript on real target hardware
 - address strap matrix evidence
 - package marking/date-code and errata review
 - POR/BOR rail cycling and `TBORD` margin

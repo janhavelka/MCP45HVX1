@@ -4,9 +4,11 @@ This checklist gates release claims for this repository. Passing software checks
 alone is not enough to claim production readiness, high-voltage validation,
 analog accuracy, or General Call safety.
 
-Current state: pre-production candidate pending hardware validation. No release
-tag is created by this checklist; create a tag only after the gates below are
-complete and an operator explicitly approves the release.
+Current state: v1.0.0 pre-production software package pending full hardware
+validation. A release tag may be created for the software package after local
+checks pass, but do not describe the release as production-ready, high-voltage
+validated, analog-accurate, or General Call safe without the physical evidence
+gates below.
 
 ## Repository State
 
@@ -27,9 +29,9 @@ complete and an operator explicitly approves the release.
 | Tag status recorded | No tag exists yet, or intended tag such as `v1.0.0` is recorded |
 | Tag created only after approval | Tag command/log recorded if a release is approved |
 
-If version `1.0.0` is retained before hardware evidence exists, describe it as
-an engineering or pre-production package version. Do not call it
-production-ready or industry-grade.
+If version `1.0.0` is retained before full physical/output-changing evidence
+exists, describe it as an engineering or pre-production package version. Do not
+call it production-ready or industry-grade.
 
 ## Software Validation
 
@@ -53,6 +55,26 @@ Remote CI can be cited only when the workflow actually ran for the release
 commit. Local checks and CI checks are separate evidence. The current workflow
 triggers on `main`, `v*` tags, and pull requests to `main`; direct hardening
 branch pushes are not remote CI evidence by themselves.
+
+## v1.0.0 Release Evidence Snapshot
+
+| Field | Evidence |
+|---|---|
+| Package version | `library.json` and `idf_component.yml`: `1.0.0` |
+| Intended tag | `v1.0.0` |
+| Release type | Pre-production software package; not production-readiness approval |
+| Local validation | `python tools/validate.py` passed before this release-prep pass |
+| Package validation | `pio pkg pack` passed during release prep; generated archive removed |
+| Package artifact and size | `MCP45HVX1-1.0.0.tar.gz`, `95527` bytes when packed locally |
+| ESP-IDF local build | Not run locally; `idf.py` was not found on PATH |
+| Remote CI | To be reviewed from the GitHub Actions run triggered by tag `v1.0.0` |
+| Safe-only HIL report | [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md) |
+| Safe-only HIL verdict | `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency `0.188 s` |
+| Panic repro report | [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md) |
+| Panic repro verdict | `PASS_SAFE_ONLY`, `23056 / 23056 / 0` soak commands |
+| Firmware under HIL | ESP32-S2 `esp32s2dev`, firmware reported `1.0.0 (4de67ab, clean)` |
+| HIL runner caveat | The 8-hour runner recorded repo `dirty=True` because the serial-drain evidence patch was uncommitted during the run; that patch is committed in `b2ae78f` |
+| Remaining non-claims | Output-changing behavior, analog movement, terminal current, high-voltage behavior, SHDN/WLAT physical behavior, rail cycling, fault injection, address strap matrix, and General Call safety |
 
 ## Packaging
 

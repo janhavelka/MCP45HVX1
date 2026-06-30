@@ -175,15 +175,53 @@ firmware must either isolate the MCP45HVX1 on its own bus or record explicit
 risk acceptance for shared-bus deployment. Output-changing General Call use
 requires isolated-bus evidence.
 
+## Poll-Chunked Jobs
+
+The synchronous public APIs remain the simplest path for most applications.
+For applications with a single owner task that must bound bus work per loop,
+the driver also exposes explicit poll jobs:
+
+- `startSetWiperJob(code)` for a one-instruction output-changing Wiper write
+- `startReadSnapshotJob()` for separate Wiper and TCON readback instructions
+- `startSetTerminalJob(terminal, enabled)` for visible TCON
+  read-modify-write sequencing
+- `startIncrementWiperJob(steps)` and `startDecrementWiperJob(steps)` for
+  bounded Wiper step chunks
+- `startRecoverJob()` for Wiper/TCON recovery readback, including from OFFLINE
+- `pollJob(nowMs, maxInstructions)` to execute bounded instructions
+- `getJobSnapshot()` / `getJobSnapshot(out)` and `jobActive()` for status
+
+While a job is active, other bus-touching public APIs return `BUSY` without
+issuing I2C traffic. Ambiguous output-changing job failures use the same
+hardware-uncertainty and cache-invalidation semantics as the synchronous APIs.
+Read-side failures stop at the first failed instruction and preserve the last
+job status in `JobSnapshot`.
+
 ## CLI Coverage
 
-The `01_basic_bringup_cli` example exposes practical chip features:
+The Arduino `01_basic_bringup_cli` and native `espidf_basic` examples expose
+the same command contract while keeping their framework code separate:
 
-- device setup: `begin`, `addr`, `res`, `rab`, `scan`, `probe`, `recover`
-- register operations: `read`, `dump`, `rreg`, `wreg`, `last`
-- wiper operations: `wiper`, `frac`, `pos`, `zero`, `mid`, `max`, `inc`, `dec`
-- terminal operations: `tcon`, `term`, `shutdown`, `software-shutdown`, `mode`
-- diagnostics: `cfg`, `settings`, `drv`, `info`, `selftest`, `stress`,
-  `stress_mix`, `iface_reset`
+- common controls: `help`, `?`, `version`, `ver`, `color`, `verbose`
+- device setup: `scan`, `begin`, `addr`, `addr_alt`, `variant`, `res`, `rab`,
+  `probe`, `recover`, `iface_reset`
+- read-only diagnostics: `cfg`, `settings`, `detail`, `drv`, `health`, `state`,
+  `info`, `errata`
+- register reads: `read`, `rregs`, `readwiper`, `readtcon`, `last`, `reg`,
+  `rreg`, `dump`, `raw`
+- output-changing Wiper operations: `wiper`, `wiper percent`,
+  `wiper fraction`, `frac`, `pos`, `zero`, `mid`, `max`, `inc`, `dec`
+- output-changing TCON operations: `tcon`, `defaults`, `term`, `terminal`,
+  `shutdown`, `software-shutdown`, `mode`
+- safe tests: `selftest`, `selftest safe`, `stress`
+- operator-gated or dangerous tests: `selftest output`, `stress_mix`,
+  `raw write`, `wreg`, `wregs`
 - General Call frames: `gc arm`, `gc disarm`, `gc wiper`, `gc tcon`, `gc inc`,
   `gc dec`
+
+The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
+`vTaskDelay`, and fixed C buffers. It does not include Arduino CLI sources or
+compatibility facades. `tools/check_cli_contract.py` and
+`tools/check_idf_example_contract.py` enforce command parity, native-IDF
+boundaries, bounded parsing, functional color support, non-placeholder
+`selftest output`, and General Call warning behavior.

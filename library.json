@@ -76,6 +76,7 @@
       "tests/**",
       "tools/**",
       "docs/**/*.pdf",
+      "docs/reports/**",
       "*.tar.gz",
       "*.tgz",
       "*.zip"
