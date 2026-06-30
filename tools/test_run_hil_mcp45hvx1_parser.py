@@ -122,12 +122,24 @@ class EmptyCli(FakeCli):
 
 
 class RaisingSerial:
+    def __init__(self) -> None:
+        self.reads = [
+            b"Guru Meditation Error: Core  0 panic'ed (LoadProhibited).\n",
+            b"Backtrace: 0x40081234:0x3ffc0000\n> ",
+        ]
+
     def write(self, data: bytes) -> int:
         del data
         raise TimeoutError("write stalled")
 
     def flush(self) -> None:
         return None
+
+    def read(self, size: int) -> bytes:
+        del size
+        if self.reads:
+            return self.reads.pop(0)
+        return b""
 
 
 class HilParserTests(unittest.TestCase):
@@ -186,6 +198,8 @@ class HilParserTests(unittest.TestCase):
 
         self.assertIn("[E] serial command failed", output)
         self.assertIn("TimeoutError", output)
+        self.assertIn("Guru Meditation Error", output)
+        self.assertIn("Backtrace:", output)
 
     def test_report_generation_does_not_false_pass_failed_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

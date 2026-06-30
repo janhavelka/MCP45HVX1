@@ -212,7 +212,12 @@ class SerialCli:
             self._serial.flush()
             return self.read_until_quiet(timeout=timeout, quiet_s=self._idle_timeout)
         except Exception as exc:
-            return f"[E] serial command failed: {type(exc).__name__}: {exc}\n"
+            pending = ""
+            try:
+                pending = self.read_until_quiet(timeout=2.0, quiet_s=self._idle_timeout)
+            except Exception as read_exc:
+                pending = f"[E] serial drain failed: {type(read_exc).__name__}: {read_exc}\n"
+            return f"[E] serial command failed: {type(exc).__name__}: {exc}\n{pending}"
 
 
 def command_failed(command: str, output: str) -> bool:
