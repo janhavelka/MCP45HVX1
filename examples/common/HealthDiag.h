@@ -125,6 +125,20 @@ inline void printSettings(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) 
   if (!s.lastError.ok() && s.lastError.msg != nullptr && s.lastError.msg[0] != '\0') {
     out.printf("  Message: %s\n", s.lastError.msg);
   }
+  out.printf("  Hardware state uncertain: %s%s%s\n",
+             s.hardwareStateUncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+             s.hardwareStateUncertain ? "true" : "false",
+             LOG_COLOR_RESET);
+  out.printf("  Last uncertainty: %s%s%s (detail=%ld)\n",
+             s.hardwareStateUncertainError.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED,
+             errName(s.hardwareStateUncertainError.code),
+             LOG_COLOR_RESET,
+             static_cast<long>(s.hardwareStateUncertainError.detail));
+  if (!s.hardwareStateUncertainError.ok() &&
+      s.hardwareStateUncertainError.msg != nullptr &&
+      s.hardwareStateUncertainError.msg[0] != '\0') {
+    out.printf("  Uncertainty message: %s\n", s.hardwareStateUncertainError.msg);
+  }
 
   out.println("=== I2C Config ===");
   out.printf("  Address: 0x%02X\n", s.config.i2cAddress);
@@ -153,9 +167,11 @@ inline void printSettings(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) 
   out.printf("  Wiper: %s 0x%02X\n",
              s.cachedWiperKnown ? "known" : "unknown",
              s.cachedWiper);
+  out.printf("  Wiper cache known: %s\n", s.cachedWiperKnown ? "true" : "false");
   out.printf("  TCON: %s 0x%02X\n",
              s.cachedTconKnown ? "known" : "unknown",
              s.cachedTcon);
+  out.printf("  TCON cache known: %s\n", s.cachedTconKnown ? "true" : "false");
   out.printf("  Address pointer: %s 0x%02X\n",
              s.addressPointerKnown ? "known" : "unknown",
              s.addressPointer);

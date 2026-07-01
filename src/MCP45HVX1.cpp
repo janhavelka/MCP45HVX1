@@ -22,6 +22,17 @@ uint8_t boundedSub(uint8_t value, uint8_t delta) {
   return delta > value ? 0 : static_cast<uint8_t>(value - delta);
 }
 
+Status validateRegisterReadback(uint8_t reg, uint8_t value, Resolution resolution) {
+  if (reg == cmd::REG_WIPER0 && value > MCP45HVX1::maxWiperCode(resolution)) {
+    return Status::Error(Err::REGISTER_MISMATCH,
+                         "Wiper readback exceeds configured resolution", value);
+  }
+  if (reg == cmd::REG_TCON0 && (value & cmd::TCON_RESERVED_MASK) != cmd::TCON_RESERVED_MASK) {
+    return Status::Error(Err::REGISTER_MISMATCH, "TCON reserved bits are not high", value);
+  }
+  return Status::Ok();
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -40,8 +51,10 @@ Status MCP45HVX1::begin(const Config& config) {
   _totalFailures = 0;
   _totalSuccess = 0;
   _clearCachedRegisters();
-  _addressPointerKnown = true;
+  _clearHardwareStateUncertainty();
+  _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
+  _resetJob();
 
   auto resetAfterFailedBegin = [this](Status failure) -> Status {
     _config = Config{};
@@ -54,8 +67,10 @@ Status MCP45HVX1::begin(const Config& config) {
     _totalFailures = 0;
     _totalSuccess = 0;
     _clearCachedRegisters();
-    _addressPointerKnown = true;
+    _clearHardwareStateUncertainty();
+    _addressPointerKnown = false;
     _addressPointer = cmd::REG_WIPER0;
+    _resetJob();
     return failure;
   };
 
@@ -88,21 +103,13 @@ Status MCP45HVX1::begin(const Config& config) {
   uint8_t wiper = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, wiper);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return resetAfterFailedBegin(st);
-    }
-    return resetAfterFailedBegin(
-        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    return resetAfterFailedBegin(_presenceReadFailureStatus(st));
   }
 
   uint8_t tcon = 0;
   st = _readRegisterRaw(cmd::REG_TCON0, tcon);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return resetAfterFailedBegin(st);
-    }
-    return resetAfterFailedBegin(
-        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    return resetAfterFailedBegin(_presenceReadFailureStatus(st));
   }
 
   if (_config.requirePowerOnDefaults) {
@@ -118,25 +125,23 @@ Status MCP45HVX1::begin(const Config& config) {
 
   _syncRegister(cmd::REG_WIPER0, wiper);
   _syncRegister(cmd::REG_TCON0, tcon);
+  _initialized = true;
+  _driverState = DriverState::READY;
 
   if (_config.writeInitialTcon) {
-    st = _writeRegisterRaw(cmd::REG_TCON0, _config.initialTcon);
+    st = writeTcon(_config.initialTcon);
     if (!st.ok()) {
-      return resetAfterFailedBegin(st);
+      return st;
     }
-    _syncRegister(cmd::REG_TCON0, sanitizeTcon(_config.initialTcon));
   }
 
   if (_config.writeInitialWiper) {
-    st = _writeRegisterRaw(cmd::REG_WIPER0, _config.initialWiperCode);
+    st = writeWiper(_config.initialWiperCode);
     if (!st.ok()) {
-      return resetAfterFailedBegin(st);
+      return st;
     }
-    _syncRegister(cmd::REG_WIPER0, _config.initialWiperCode);
   }
 
-  _initialized = true;
-  _driverState = DriverState::READY;
   return Status::Ok();
 }
 
@@ -156,8 +161,112 @@ void MCP45HVX1::end() {
   _totalFailures = 0;
   _totalSuccess = 0;
   _clearCachedRegisters();
-  _addressPointerKnown = true;
+  _clearHardwareStateUncertainty();
+  _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
+  _resetJob();
+}
+
+// ===========================================================================
+// Poll-Chunked Jobs
+// ===========================================================================
+
+Status MCP45HVX1::startSetWiperJob(uint8_t code) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (!_isValidWiperCode(code, _config.resolution)) {
+    return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", code);
+  }
+
+  Status st = _startJob(JobType::SetWiper, true, 1);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.target = code;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::startReadSnapshotJob() {
+  return _startJob(JobType::ReadSnapshot, false, 2);
+}
+
+Status MCP45HVX1::startSetTerminalJob(Terminal terminal, bool enabled) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  const uint8_t mask = _terminalMask(terminal);
+  if (mask == INVALID_TERMINAL_MASK) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid terminal");
+  }
+
+  Status st = _startJob(JobType::SetTerminal, true, 2);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.terminal = terminal;
+  _job.terminalEnabled = enabled;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::startIncrementWiperJob(uint8_t steps) {
+  return _startStepJob(JobType::IncrementWiper, cmd::Command::Increment, steps);
+}
+
+Status MCP45HVX1::startDecrementWiperJob(uint8_t steps) {
+  return _startStepJob(JobType::DecrementWiper, cmd::Command::Decrement, steps);
+}
+
+Status MCP45HVX1::startRecoverJob() {
+  Status st = _startJob(JobType::Recover, false, 2, true);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.recoverStartedOffline = _driverState == DriverState::OFFLINE;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::pollJob(uint32_t nowMs, uint8_t maxInstructions) {
+  (void)nowMs;
+
+  if (!_job.snapshot.active) {
+    return _job.snapshot.status;
+  }
+
+  _job.snapshot.lastPollInstructions = 0;
+  if (maxInstructions == 0) {
+    _job.snapshot.status = Status::InProgress("Job in progress");
+    return _job.snapshot.status;
+  }
+
+  const uint8_t budget = _jobRunsSingleInstructionPerPoll() ? 1 : maxInstructions;
+  while (_job.snapshot.active && _job.snapshot.lastPollInstructions < budget) {
+    Status st = _pollJobOneInstruction();
+    _job.snapshot.lastPollInstructions++;
+    if (!st.ok()) {
+      _completeJob(st);
+      break;
+    }
+    if (_job.snapshot.instructionsCompleted < std::numeric_limits<uint8_t>::max()) {
+      _job.snapshot.instructionsCompleted++;
+    }
+  }
+
+  if (_job.snapshot.active) {
+    _job.snapshot.status = Status::InProgress("Job in progress");
+  }
+  return _job.snapshot.status;
+}
+
+Status MCP45HVX1::getJobSnapshot(JobSnapshot& out) const {
+  out = _job.snapshot;
+  return Status::Ok();
 }
 
 SettingsSnapshot MCP45HVX1::getSettings() const {
@@ -173,6 +282,8 @@ Status MCP45HVX1::getSettings(SettingsSnapshot& out) const {
   out.lastOkMs = _lastOkMs;
   out.lastErrorMs = _lastErrorMs;
   out.lastError = _lastError;
+  out.hardwareStateUncertain = _hardwareStateUncertain;
+  out.hardwareStateUncertainError = _hardwareStateUncertainError;
   out.consecutiveFailures = _consecutiveFailures;
   out.totalFailures = _totalFailures;
   out.totalSuccess = _totalSuccess;
@@ -207,14 +318,14 @@ Status MCP45HVX1::probe() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   uint8_t value = 0;
   Status st = _readRegisterRaw(cmd::REG_WIPER0, value);
   if (!st.ok()) {
-    if (st.code == Err::REGISTER_MISMATCH) {
-      return st;
-    }
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return _presenceReadFailureStatus(st);
   }
   return Status::Ok();
 }
@@ -222,6 +333,9 @@ Status MCP45HVX1::probe() {
 Status MCP45HVX1::recover() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
 
   const bool startedOffline = _driverState == DriverState::OFFLINE;
@@ -234,6 +348,7 @@ Status MCP45HVX1::recover() {
     return st;
   }
   _syncRegister(cmd::REG_WIPER0, wiper);
+  _markRegisterReadbackVerified(cmd::REG_WIPER0);
 
   uint8_t tcon = 0;
   st = _readRegisterTracked(cmd::REG_TCON0, tcon);
@@ -244,6 +359,7 @@ Status MCP45HVX1::recover() {
     return st;
   }
   _syncRegister(cmd::REG_TCON0, tcon);
+  _markRegisterReadbackVerified(cmd::REG_TCON0);
 
   return Status::Ok();
 }
@@ -252,15 +368,16 @@ Status MCP45HVX1::resetI2cState() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
-  const bool startedOffline = _driverState == DriverState::OFFLINE;
-  Status st = _busResetTracked(!startedOffline);
-  if (!st.ok()) {
-    return st;
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
-
+  if (_config.busReset == nullptr) {
+    return _busResetTracked();
+  }
   _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
-  if (startedOffline) {
+  Status st = _busResetTracked();
+  if (!st.ok()) {
     return st;
   }
   return st;
@@ -269,6 +386,9 @@ Status MCP45HVX1::resetI2cState() {
 Status MCP45HVX1::restorePowerOnDefaults() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
 
   Status st = writeTcon(cmd::TCON_DEFAULT);
@@ -291,10 +411,16 @@ Status MCP45HVX1::writeWiper(uint8_t code) {
 }
 
 Status MCP45HVX1::incrementWiper(uint8_t steps) {
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   return _sendWiperStepCommand(cmd::Command::Increment, steps);
 }
 
 Status MCP45HVX1::decrementWiper(uint8_t steps) {
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   return _sendWiperStepCommand(cmd::Command::Decrement, steps);
 }
 
@@ -485,11 +611,17 @@ Status MCP45HVX1::readTerminalStatus(TerminalStatus& status) {
 }
 
 Status MCP45HVX1::readSnapshot(RegisterSnapshot& snapshot) {
-  Status st = readWiper(snapshot.wiper);
+  RegisterSnapshot next;
+  Status st = readWiper(next.wiper);
   if (!st.ok()) {
     return st;
   }
-  return readTcon(snapshot.tcon);
+  st = readTcon(next.tcon);
+  if (!st.ok()) {
+    return st;
+  }
+  snapshot = next;
+  return Status::Ok();
 }
 
 // ===========================================================================
@@ -499,6 +631,9 @@ Status MCP45HVX1::readSnapshot(RegisterSnapshot& snapshot) {
 Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
   if (!_isValidRegister(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Register address is reserved");
@@ -512,12 +647,16 @@ Status MCP45HVX1::readRegister(uint8_t reg, uint8_t& value) {
     return st;
   }
   _syncRegister(reg, value);
+  _markRegisterReadbackVerified(reg);
   return Status::Ok();
 }
 
 Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
   if (!_isWritableRegister(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Register address is not writable");
@@ -532,6 +671,9 @@ Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
   const uint8_t sanitized = (reg == cmd::REG_TCON0) ? sanitizeTcon(value) : value;
   Status st = _writeRegisterTracked(reg, sanitized);
   if (!st.ok()) {
+    if (_isAmbiguousStateWriteFailure(st)) {
+      _markHardwareStateUncertain(st, reg == cmd::REG_WIPER0, reg == cmd::REG_TCON0);
+    }
     return st;
   }
   _syncRegister(reg, sanitized);
@@ -541,6 +683,9 @@ Status MCP45HVX1::writeRegister(uint8_t reg, uint8_t value) {
 Status MCP45HVX1::readLastAddress(uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
   }
   if (_driverState == DriverState::OFFLINE) {
     return _offlineStatus();
@@ -556,6 +701,9 @@ Status MCP45HVX1::generalCallWriteWiper(uint8_t code) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
   if (!_isValidWiperCode(code, _config.resolution)) {
     return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", code);
   }
@@ -563,6 +711,8 @@ Status MCP45HVX1::generalCallWriteWiper(uint8_t code) {
   Status st = _generalCallWrite(cmd::GC_WRITE_WIPER0, &code, 1);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
 }
@@ -571,11 +721,16 @@ Status MCP45HVX1::generalCallWriteTcon(uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   const uint8_t sanitized = sanitizeTcon(value);
   Status st = _generalCallWrite(cmd::GC_WRITE_TCON0, &sanitized, 1);
   if (st.ok()) {
     _cachedTconKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, false, true);
   }
   return st;
 }
@@ -584,10 +739,15 @@ Status MCP45HVX1::generalCallIncrementWiper() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   Status st = _generalCallWrite(cmd::GC_INCREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
 }
@@ -596,12 +756,232 @@ Status MCP45HVX1::generalCallDecrementWiper() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
 
   Status st = _generalCallWrite(cmd::GC_DECREMENT_WIPER0, nullptr, 0);
   if (st.ok()) {
     _cachedWiperKnown = false;
+  } else if (_isAmbiguousStateWriteFailure(st)) {
+    _markHardwareStateUncertain(st, true, false);
   }
   return st;
+}
+
+// ===========================================================================
+// Poll-Job Helpers
+// ===========================================================================
+
+Status MCP45HVX1::_startJob(JobType type, bool outputChanging, uint8_t instructionsPlanned,
+                            bool allowOffline) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (!allowOffline && _driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
+
+  _job = ActiveJob{};
+  _job.snapshot.type = type;
+  _job.snapshot.active = true;
+  _job.snapshot.outputChanging = outputChanging;
+  _job.snapshot.instructionsPlanned = instructionsPlanned;
+  _job.snapshot.status = Status::InProgress("Job in progress");
+  return Status::Ok();
+}
+
+Status MCP45HVX1::_startStepJob(JobType type, cmd::Command command, uint8_t steps) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_job.snapshot.active) {
+    return _jobBusyStatus();
+  }
+  if (command != cmd::Command::Increment && command != cmd::Command::Decrement) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid wiper step command");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
+  }
+  if (steps == 0) {
+    return Status::Ok();
+  }
+
+  const uint8_t planned =
+      static_cast<uint8_t>((steps + cmd::MAX_COMMAND_CHUNK - 1U) / cmd::MAX_COMMAND_CHUNK);
+  Status st = _startJob(type, true, planned);
+  if (!st.ok()) {
+    return st;
+  }
+  _job.remainingSteps = steps;
+  _job.stepCommand = command;
+  return Status::Ok();
+}
+
+Status MCP45HVX1::_pollJobOneInstruction() {
+  switch (_job.snapshot.type) {
+    case JobType::SetWiper: {
+      Status st = _writeRegisterTracked(cmd::REG_WIPER0, _job.target);
+      if (!st.ok()) {
+        if (_isAmbiguousStateWriteFailure(st)) {
+          _markHardwareStateUncertain(st, true, false);
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_WIPER0, _job.target);
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::ReadSnapshot: {
+      if (_job.phase == 0) {
+        uint8_t wiper = 0;
+        Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
+        if (!st.ok()) {
+          return st;
+        }
+        _syncRegister(cmd::REG_WIPER0, wiper);
+        _markRegisterReadbackVerified(cmd::REG_WIPER0);
+        _job.snapshot.registers.wiper = wiper;
+        _job.phase = 1;
+        return Status::Ok();
+      }
+
+      uint8_t tcon = 0;
+      Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+      if (!st.ok()) {
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, tcon);
+      _markRegisterReadbackVerified(cmd::REG_TCON0);
+      _job.snapshot.registers.tcon = tcon;
+      _job.snapshot.registersValid = true;
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::SetTerminal: {
+      if (_job.phase == 0) {
+        uint8_t tcon = 0;
+        Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+        if (!st.ok()) {
+          return st;
+        }
+        _syncRegister(cmd::REG_TCON0, tcon);
+        _markRegisterReadbackVerified(cmd::REG_TCON0);
+
+        const uint8_t mask = _terminalMask(_job.terminal);
+        uint8_t next = tcon;
+        if (_job.terminalEnabled) {
+          next = static_cast<uint8_t>(next | mask);
+        } else {
+          next = static_cast<uint8_t>(next & ~mask);
+        }
+        next = sanitizeTcon(next);
+
+        if (next == tcon) {
+          _job.snapshot.instructionsPlanned = 1;
+          _completeJob(Status::Ok());
+          return Status::Ok();
+        }
+
+        _job.temp = next;
+        _job.phase = 1;
+        return Status::Ok();
+      }
+
+      Status st = _writeRegisterTracked(cmd::REG_TCON0, _job.temp);
+      if (!st.ok()) {
+        if (_isAmbiguousStateWriteFailure(st)) {
+          _markHardwareStateUncertain(st, false, true);
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, _job.temp);
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::IncrementWiper:
+    case JobType::DecrementWiper: {
+      const uint8_t chunk = _job.remainingSteps > cmd::MAX_COMMAND_CHUNK
+                                ? static_cast<uint8_t>(cmd::MAX_COMMAND_CHUNK)
+                                : _job.remainingSteps;
+      Status st = _sendWiperStepCommand(_job.stepCommand, chunk);
+      if (!st.ok()) {
+        return st;
+      }
+      _job.remainingSteps = static_cast<uint8_t>(_job.remainingSteps - chunk);
+      if (_job.remainingSteps == 0) {
+        _completeJob(Status::Ok());
+      }
+      return Status::Ok();
+    }
+
+    case JobType::Recover: {
+      if (_job.phase == 0) {
+        uint8_t wiper = 0;
+        Status st = _readRegisterTracked(cmd::REG_WIPER0, wiper);
+        if (!st.ok()) {
+          if (_job.recoverStartedOffline) {
+            _reassertOfflineLatch();
+          }
+          return st;
+        }
+        _syncRegister(cmd::REG_WIPER0, wiper);
+        _markRegisterReadbackVerified(cmd::REG_WIPER0);
+        _job.snapshot.registers.wiper = wiper;
+        _job.phase = 1;
+        if (_job.recoverStartedOffline) {
+          _reassertOfflineLatch();
+        }
+        return Status::Ok();
+      }
+
+      uint8_t tcon = 0;
+      Status st = _readRegisterTracked(cmd::REG_TCON0, tcon);
+      if (!st.ok()) {
+        if (_job.recoverStartedOffline) {
+          _reassertOfflineLatch();
+        }
+        return st;
+      }
+      _syncRegister(cmd::REG_TCON0, tcon);
+      _markRegisterReadbackVerified(cmd::REG_TCON0);
+      _job.snapshot.registers.tcon = tcon;
+      _job.snapshot.registersValid = true;
+      _completeJob(Status::Ok());
+      return Status::Ok();
+    }
+
+    case JobType::None:
+    default:
+      return Status::Error(Err::INVALID_PARAM, "No active job");
+  }
+}
+
+bool MCP45HVX1::_jobRunsSingleInstructionPerPoll() const {
+  return _job.snapshot.type == JobType::SetWiper ||
+         _job.snapshot.type == JobType::IncrementWiper ||
+         _job.snapshot.type == JobType::DecrementWiper;
+}
+
+void MCP45HVX1::_completeJob(const Status& st) {
+  _job.snapshot.active = false;
+  _job.snapshot.status = st;
+}
+
+void MCP45HVX1::_resetJob() {
+  _job = ActiveJob{};
+  _job.snapshot.status = Status::Ok();
+}
+
+Status MCP45HVX1::_jobBusyStatus() const {
+  return Status::Error(Err::BUSY, "Poll job active");
 }
 
 // ===========================================================================
@@ -655,7 +1035,7 @@ Status MCP45HVX1::_i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len)
   return _updateHealth(st);
 }
 
-Status MCP45HVX1::_busResetTracked(bool trackSuccess) {
+Status MCP45HVX1::_busResetTracked() {
   if (_config.busReset == nullptr) {
     return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
@@ -667,7 +1047,7 @@ Status MCP45HVX1::_busResetTracked(bool trackSuccess) {
   if (!st.ok()) {
     return _updateHealth(st);
   }
-  return trackSuccess ? _updateHealth(st) : st;
+  return st;
 }
 
 // ===========================================================================
@@ -689,7 +1069,12 @@ Status MCP45HVX1::_readRegisterRaw(uint8_t reg, uint8_t& value) {
     return Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                          rx[cmd::READ_MSB_INDEX]);
   }
-  value = rx[cmd::READ_LSB_INDEX];
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  st = validateRegisterReadback(reg, readback, _config.resolution);
+  if (!st.ok()) {
+    return st;
+  }
+  value = readback;
   _addressPointerKnown = true;
   _addressPointer = reg;
   return Status::Ok();
@@ -713,11 +1098,16 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
     return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                                         rx[cmd::READ_MSB_INDEX]));
   }
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  Status readbackStatus = validateRegisterReadback(reg, readback, _config.resolution);
+  if (!readbackStatus.ok()) {
+    return _recordFailure(readbackStatus);
+  }
   st = _updateHealth(st);
   if (!st.ok()) {
     return st;
   }
-  value = rx[cmd::READ_LSB_INDEX];
+  value = readback;
   _addressPointerKnown = true;
   _addressPointer = reg;
   return Status::Ok();
@@ -736,13 +1126,24 @@ Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
     return _recordFailure(Status::Error(Err::REGISTER_MISMATCH, "Read MSB byte is not zero",
                                         rx[cmd::READ_MSB_INDEX]));
   }
+  const uint8_t readback = rx[cmd::READ_LSB_INDEX];
+  if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
+    Status readbackStatus = validateRegisterReadback(_addressPointer, readback,
+                                                     _config.resolution);
+    if (!readbackStatus.ok()) {
+      return _recordFailure(readbackStatus);
+    }
+  }
   st = _updateHealth(st);
   if (!st.ok()) {
     return st;
   }
-  value = rx[cmd::READ_LSB_INDEX];
   if (_addressPointerKnown && _isValidRegister(_addressPointer)) {
+    value = readback;
     _syncRegister(_addressPointer, value);
+    _markRegisterReadbackVerified(_addressPointer);
+  } else {
+    value = readback;
   }
   return Status::Ok();
 }
@@ -805,6 +1206,9 @@ Status MCP45HVX1::_sendWiperStepCommand(cmd::Command command, uint8_t steps) {
 
     Status st = _i2cWriteTracked(_config.i2cAddress, payload, chunk);
     if (!st.ok()) {
+      if (_isAmbiguousStateWriteFailure(st)) {
+        _markHardwareStateUncertain(st, true, false);
+      }
       return st;
     }
 
@@ -833,12 +1237,25 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
   if (_driverState == DriverState::OFFLINE) {
     return _offlineStatus();
   }
+  if (!_config.allowGeneralCall) {
+    return Status::Error(Err::UNSUPPORTED,
+                         "General Call disabled by Config::allowGeneralCall");
+  }
 
   uint8_t payload[2] = {commandByte, 0};
   if (len == 1) {
     payload[1] = data[0];
   }
-  return _i2cWriteTracked(cmd::GENERAL_CALL_ADDRESS, payload, len + 1);
+  Status st = _i2cWriteRaw(cmd::GENERAL_CALL_ADDRESS, payload, len + 1);
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
+    return st;
+  }
+  if (!st.ok()) {
+    return _updateHealth(st);
+  }
+  _addressPointerKnown = false;
+  _addressPointer = cmd::REG_WIPER0;
+  return st;
 }
 
 // ===========================================================================
@@ -872,6 +1289,13 @@ bool MCP45HVX1::_isWritableRegister(uint8_t reg) {
 
 bool MCP45HVX1::_isValidWiperCode(uint8_t code, Resolution resolution) {
   return code <= maxWiperCode(resolution);
+}
+
+Status MCP45HVX1::_presenceReadFailureStatus(const Status& st) {
+  if (st.code == Err::I2C_NACK_ADDR) {
+    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+  }
+  return st;
 }
 
 uint8_t MCP45HVX1::_terminalMask(Terminal terminal) {
@@ -951,6 +1375,65 @@ void MCP45HVX1::_clearCachedRegisters() {
   _cachedWiper = 0;
   _cachedTconKnown = false;
   _cachedTcon = cmd::TCON_DEFAULT;
+}
+
+bool MCP45HVX1::_isAmbiguousStateWriteFailure(const Status& st) {
+  if (st.ok() || st.inProgress()) {
+    return false;
+  }
+
+  switch (st.code) {
+    case Err::INVALID_CONFIG:
+    case Err::INVALID_PARAM:
+    case Err::NOT_INITIALIZED:
+    case Err::UNSUPPORTED:
+    case Err::BUSY:
+    case Err::DEVICE_NOT_FOUND:
+    case Err::REGISTER_MISMATCH:
+    case Err::I2C_NACK_ADDR:
+      return false;
+    default:
+      return true;
+  }
+}
+
+void MCP45HVX1::_markHardwareStateUncertain(const Status& st,
+                                            bool wiperAffected,
+                                            bool tconAffected) {
+  if (wiperAffected) {
+    _cachedWiperKnown = false;
+    _wiperReadbackRequiredForUncertainty = true;
+  }
+  if (tconAffected) {
+    _cachedTconKnown = false;
+    _tconReadbackRequiredForUncertainty = true;
+  }
+  if (wiperAffected || tconAffected) {
+    _hardwareStateUncertain = true;
+    _hardwareStateUncertainError = st;
+    _addressPointerKnown = false;
+  }
+}
+
+void MCP45HVX1::_markRegisterReadbackVerified(uint8_t reg) {
+  if (reg == cmd::REG_WIPER0) {
+    _wiperReadbackRequiredForUncertainty = false;
+  } else if (reg == cmd::REG_TCON0) {
+    _tconReadbackRequiredForUncertainty = false;
+  }
+
+  if (_hardwareStateUncertain &&
+      !_wiperReadbackRequiredForUncertainty &&
+      !_tconReadbackRequiredForUncertainty) {
+    _clearHardwareStateUncertainty();
+  }
+}
+
+void MCP45HVX1::_clearHardwareStateUncertainty() {
+  _hardwareStateUncertain = false;
+  _hardwareStateUncertainError = Status::Ok();
+  _wiperReadbackRequiredForUncertainty = false;
+  _tconReadbackRequiredForUncertainty = false;
 }
 
 // ===========================================================================

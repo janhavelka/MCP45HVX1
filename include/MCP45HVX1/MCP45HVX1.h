@@ -33,7 +33,7 @@ enum class TerminalMode : uint8_t {
   RheostatBToW,  ///< P0A disconnected; P0B and P0W connected
   RheostatAToW,  ///< P0B disconnected; P0A and P0W connected
   WiperFloating, ///< P0W disconnected; P0A and P0B connected
-  Shutdown,      ///< Software shutdown via R0HW=0
+  Shutdown,      ///< TCON software shutdown via R0HW=0, not the external SHDN pin.
   Custom         ///< Valid TCON state that does not match a named preset
 };
 
@@ -43,12 +43,36 @@ struct RegisterSnapshot {
   uint8_t tcon = 0;  ///< Volatile TCON0 register
 };
 
+/// Active or most recently completed poll-job type.
+enum class JobType : uint8_t {
+  None,            ///< No job has been started.
+  SetWiper,        ///< One-instruction raw Wiper write.
+  ReadSnapshot,    ///< Chunked Wiper then TCON readback.
+  SetTerminal,     ///< Chunked TCON read-modify-write terminal helper.
+  IncrementWiper,  ///< Chunked Wiper increment command sequence.
+  DecrementWiper,  ///< Chunked Wiper decrement command sequence.
+  Recover          ///< Chunked Wiper/TCON recovery readback.
+};
+
+/// Snapshot of the active or most recently completed poll job.
+struct JobSnapshot {
+  JobType type = JobType::None; ///< Current or last job type.
+  bool active = false;          ///< true while pollJob() still has work to do.
+  bool outputChanging = false;  ///< true when the job can change Wiper/TCON state.
+  uint8_t instructionsCompleted = 0; ///< Successfully acknowledged instructions.
+  uint8_t instructionsPlanned = 0;   ///< Planned register-read or command-write instructions.
+  uint8_t lastPollInstructions = 0;  ///< I2C instructions attempted by the last pollJob().
+  Status status = Status::Ok();      ///< Last job status.
+  RegisterSnapshot registers;        ///< Completed readback result for snapshot/recover jobs.
+  bool registersValid = false;       ///< true when registers contains a completed readback.
+};
+
 /// Decoded terminal-control register fields.
 struct TerminalStatus {
-  bool softwareShutdown = false; ///< true when R0HW=0
-  bool terminalA = false;        ///< P0A connection bit
-  bool terminalW = false;        ///< P0W connection bit
-  bool terminalB = false;        ///< P0B connection bit
+  bool softwareShutdown = false; ///< true when TCON R0HW=0; does not report SHDN pin
+  bool terminalA = false;        ///< Decoded TCON P0A connection bit; SHDN can override
+  bool terminalW = false;        ///< Decoded TCON P0W connection bit; SHDN can override
+  bool terminalB = false;        ///< Decoded TCON P0B connection bit; SHDN can override
   TerminalMode mode = TerminalMode::Potentiometer; ///< Best-fit decoded mode
 };
 
@@ -66,6 +90,8 @@ struct DeviceInfo {
 };
 
 /// Static summary of the published silicon errata that affects bus planning.
+/// This is release-gate input for documentation/CLI diagnostics, not proof that
+/// a specific board or silicon lot is safe for shared-bus or General Call use.
 struct SiliconErrataInfo {
   const char* documentNumber = "DS80000649B"; ///< Microchip errata document number.
   const char* documentRevision = "B (July 2015)"; ///< Errata revision used by this driver.
@@ -76,6 +102,9 @@ struct SiliconErrataInfo {
   bool generalCallAddressDecodeHazard = true; ///< Invalid GC command address bits can alias.
   bool hardwareGeneralCallBitIgnored = true; ///< Hardware GC bit is not decoded as specified.
   bool uniqueBusWorkaroundForAffectedSilicon = true; ///< Errata workaround uses an isolated bus.
+  bool productionReleaseGateRequired = true; ///< Production release must review silicon errata.
+  bool sharedBusRiskAcceptanceRequired = true; ///< Shared-bus use needs isolated-bus proof or risk acceptance.
+  bool generalCallRequiresIsolatedBusEvidence = true; ///< Output-changing GC requires isolated-bus evidence.
 };
 
 /// Snapshot of the current driver settings and health state.
@@ -86,6 +115,8 @@ struct SettingsSnapshot {
   uint32_t lastOkMs = 0;
   uint32_t lastErrorMs = 0;
   Status lastError = Status::Ok();
+  bool hardwareStateUncertain = false; ///< true when volatile hardware state needs readback
+  Status hardwareStateUncertainError = Status::Ok(); ///< Last ambiguous state-changing failure
   uint8_t consecutiveFailures = 0;
   uint32_t totalFailures = 0;
   uint32_t totalSuccess = 0;
@@ -98,8 +129,22 @@ struct SettingsSnapshot {
 };
 
 /// MCP45HVX1 driver class.
+///
+/// The driver is stateful: it stores non-owning callback pointers, user
+/// contexts, health counters, and volatile register cache state. Callback
+/// targets and user contexts must outlive every call that can use them. Public
+/// APIs are synchronous, not internally serialized, and not ISR-safe.
+/// The core does not own analog rails or hardware pins. SHDN is an external
+/// active-low pin and WLAT is an external wiper-latch pin unless an application
+/// adapter explicitly controls them.
 class MCP45HVX1 {
 public:
+  MCP45HVX1() = default;
+  MCP45HVX1(const MCP45HVX1&) = delete;
+  MCP45HVX1& operator=(const MCP45HVX1&) = delete;
+  MCP45HVX1(MCP45HVX1&&) = delete;
+  MCP45HVX1& operator=(MCP45HVX1&&) = delete;
+
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -107,11 +152,18 @@ public:
   /// Initialize the driver with configuration.
   ///
   /// By default this only reads Wiper/TCON to verify presence and cache state.
-  /// Initial register writes are opt-in via Config::writeInitialWiper and
-  /// Config::writeInitialTcon.
+  /// It does not delay for POR/BOR; applications must ensure rails, reset, SHDN,
+  /// and WLAT are stable before calling begin().
+  /// Output-changing startup writes are opt-in via Config::writeInitialWiper
+  /// and Config::writeInitialTcon and run only after baseline reads succeed.
+  /// If an optional startup write fails, the driver preserves config/transport
+  /// state for readback/recover diagnostics and uses hardwareStateUncertain()
+  /// for ambiguous write failures.
+  /// Baseline address NACK maps to DEVICE_NOT_FOUND; timeout, bus, data-NACK,
+  /// generic I2C, and register-format failures are returned as reported.
   ///
   /// @param config Transport callbacks, device address, variant, and startup policy.
-  /// @return Status::Ok() when the device is present and the runtime cache is valid.
+  /// @return Status::Ok() when the baseline cache is valid and optional writes, if any, succeeded.
   Status begin(const Config& config);
 
   /// Process pending operations (currently a no-op).
@@ -122,19 +174,83 @@ public:
   void end();
 
   // =========================================================================
+  // Poll-Chunked Jobs
+  // =========================================================================
+
+  /// Start a one-instruction raw Wiper write job.
+  /// pollJob() executes at most one instruction for this output-changing job.
+  /// @param code New raw wiper code.
+  /// @return Status::Ok() when the job is accepted.
+  Status startSetWiperJob(uint8_t code);
+
+  /// Start a chunked readback of Wiper then TCON.
+  /// @return Status::Ok() when the job is accepted.
+  Status startReadSnapshotJob();
+
+  /// Start a chunked terminal read-modify-write helper.
+  /// @param terminal Terminal selector.
+  /// @param enabled true to connect the terminal switch, false to open it.
+  /// @return Status::Ok() when the job is accepted.
+  Status startSetTerminalJob(Terminal terminal, bool enabled);
+
+  /// Start a chunked Wiper increment sequence.
+  /// @param steps Number of increment commands to send; zero is a no-op.
+  /// @return Status::Ok() when the job is accepted or no-op zero steps are requested.
+  Status startIncrementWiperJob(uint8_t steps = 1);
+
+  /// Start a chunked Wiper decrement sequence.
+  /// @param steps Number of decrement commands to send; zero is a no-op.
+  /// @return Status::Ok() when the job is accepted or no-op zero steps are requested.
+  Status startDecrementWiperJob(uint8_t steps = 1);
+
+  /// Start a chunked recovery readback job. This is allowed while OFFLINE.
+  /// @return Status::Ok() when the job is accepted.
+  Status startRecoverJob();
+
+  /// Execute up to maxInstructions I2C instructions from the active job.
+  ///
+  /// A register read or a command write chunk is one instruction. Direct
+  /// output-changing Wiper and Wiper step jobs execute at most one instruction
+  /// per poll even when maxInstructions is larger.
+  /// @param nowMs Current monotonic time in milliseconds; reserved for caller scheduling.
+  /// @param maxInstructions Maximum instructions to attempt in this poll.
+  /// @return IN_PROGRESS while work remains, otherwise the final job status.
+  Status pollJob(uint32_t nowMs, uint8_t maxInstructions);
+
+  /// @return Active or most recently completed job snapshot.
+  JobSnapshot getJobSnapshot() const { return _job.snapshot; }
+
+  /// Copy active or most recently completed job snapshot.
+  /// @param out Receives the job snapshot.
+  /// @return Status::Ok().
+  Status getJobSnapshot(JobSnapshot& out) const;
+
+  /// @return true while a poll job is active.
+  bool jobActive() const { return _job.snapshot.active; }
+
+  // =========================================================================
   // Diagnostics
   // =========================================================================
 
-  /// Check if device is present on the bus without changing health counters.
+  /// Check if device is present on the bus without changing health counters or
+  /// Wiper/TCON cache. The raw read may update address-pointer knowledge.
+  /// Address NACK maps to DEVICE_NOT_FOUND; timeout, bus, data-NACK, generic I2C,
+  /// and register-format errors are returned as reported.
   /// @return Status::Ok() on ACK/read success, otherwise transport or presence error.
   Status probe();
 
-  /// Attempt to recover from DEGRADED/OFFLINE state by tracked register reads.
+  /// Attempt to recover from DEGRADED/OFFLINE or startup-write uncertainty by tracked register reads.
+  /// This does not run the bus-reset callback. It reads Wiper then TCON, refreshes
+  /// caches, clears hardware uncertainty only for verified readback, and returns
+  /// READY only after both reads succeed. If recovery starts OFFLINE and only
+  /// partially succeeds, the OFFLINE latch is restored.
   /// @return Status::Ok() if Wiper/TCON were read and health returned online.
   Status recover();
 
   /// Run the optional board-provided I2C bus/software-reset callback.
   /// This resets only the I2C interface state, not Wiper/TCON registers.
+  /// A successful callback does not prove device presence, update register cache,
+  /// clear hardware uncertainty, or mark an OFFLINE/DEGRADED driver READY.
   /// @return Status::Ok() when the callback succeeds, or UNSUPPORTED if none was provided.
   Status resetI2cState();
 
@@ -153,7 +269,11 @@ public:
   /// @return Current driver health state.
   DriverState state() const { return _driverState; }
 
-  /// @return true after a successful begin() and before end().
+  /// @return Current driver health state; compatibility alias for sibling drivers.
+  DriverState driverState() const { return state(); }
+
+  /// @return true after begin() establishes config/transport state and before end().
+  /// A failed optional startup write can still leave this true for diagnostics.
   bool isInitialized() const { return _initialized; }
 
   /// @return true when the driver is READY or DEGRADED.
@@ -192,13 +312,19 @@ public:
   /// @return Last tracked error status.
   Status lastError() const { return _lastError; }
 
+  /// @return true when Wiper/TCON hardware state may differ from verified readback state.
+  bool hardwareStateUncertain() const { return _hardwareStateUncertain; }
+
+  /// @return Last ambiguous state-changing failure that made hardware state uncertain.
+  Status hardwareStateUncertainError() const { return _hardwareStateUncertainError; }
+
   /// @return Current consecutive tracked failure count.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
 
-  /// @return Total tracked failures since the last successful begin().
+  /// @return Total tracked failures since the last lifecycle reset or begin attempt.
   uint32_t totalFailures() const { return _totalFailures; }
 
-  /// @return Total tracked successes since the last successful begin().
+  /// @return Total tracked successes since the last lifecycle reset or begin attempt.
   uint32_t totalSuccess() const { return _totalSuccess; }
 
   // =========================================================================
@@ -212,17 +338,20 @@ public:
 
   /// Write volatile Wiper 0. Rejects codes outside the configured resolution.
   /// @param code New raw wiper code.
-  /// @return Status::Ok() after the write is ACKed and cached.
+  /// @return Status::Ok() after the write is ACKed and cached. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status writeWiper(uint8_t code);
 
   /// Increment volatile Wiper 0 by one or more steps.
   /// @param steps Number of increment commands to send; zero is a no-op.
-  /// @return Status::Ok() when all required step commands complete.
+  /// @return Status::Ok() when all required step commands complete. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status incrementWiper(uint8_t steps = 1);
 
   /// Decrement volatile Wiper 0 by one or more steps.
   /// @param steps Number of decrement commands to send; zero is a no-op.
-  /// @return Status::Ok() when all required step commands complete.
+  /// @return Status::Ok() when all required step commands complete. Ambiguous transport failures
+  /// mark the Wiper cache unknown and set hardwareStateUncertain().
   Status decrementWiper(uint8_t steps = 1);
 
   /// Convert a normalized 0.0-1.0 position to the nearest valid wiper code.
@@ -243,8 +372,10 @@ public:
   Status readWiperFraction(float& fraction);
 
   /// Write volatile Wiper 0 from a normalized 0.0-1.0 position.
-  /// @param fraction Normalized target position; values outside range are clamped.
-  /// @return Status::Ok() after the resulting code is written.
+  /// Unlike codeFromFraction(), this output-changing API rejects values outside
+  /// 0.0-1.0 instead of clamping them.
+  /// @param fraction Normalized target position in the inclusive range 0.0-1.0.
+  /// @return Status::Ok() after the resulting code is written, or INVALID_PARAM for out of range.
   Status writeWiperFraction(float fraction);
 
   /// Maximum valid wiper code for a resolution.
@@ -311,8 +442,11 @@ public:
   Status readTcon(uint8_t& value);
 
   /// Write volatile TCON0. Reserved upper bits are forced to 1.
+  /// This changes TCON software terminal state only. The external SHDN pin can
+  /// override the physical terminal output without changing the register.
   /// @param value Requested TCON0 byte; reserved bits are sanitized before write.
-  /// @return Status::Ok() after the sanitized value is written and cached.
+  /// @return Status::Ok() after the sanitized value is written and cached. Ambiguous transport
+  /// failures mark the TCON cache unknown and set hardwareStateUncertain().
   Status writeTcon(uint8_t value);
 
   /// Configure one terminal's connection bit.
@@ -327,13 +461,15 @@ public:
   /// @return Status::Ok() on a valid TCON0 read.
   Status getTerminalEnabled(Terminal terminal, bool& enabled);
 
-  /// Enable or disable software shutdown via R0HW.
-  /// @param enabled true to enter software shutdown, false to keep R0HW connected.
+  /// Enable or disable TCON software shutdown via R0HW.
+  /// This is not control of the external active-low SHDN hardware pin.
+  /// @param enabled true to enter TCON software shutdown, false to keep R0HW connected.
   /// @return Status::Ok() after TCON0 is updated.
   Status setSoftwareShutdown(bool enabled);
 
-  /// Read software shutdown bit state from TCON0.
-  /// @param enabled Receives true when software shutdown is active.
+  /// Read TCON software shutdown bit state from TCON0.
+  /// This does not report the physical SHDN pin level.
+  /// @param enabled Receives true when TCON software shutdown is active.
   /// @return Status::Ok() on a valid TCON0 read.
   Status getSoftwareShutdown(bool& enabled);
 
@@ -353,6 +489,9 @@ public:
   Status readTerminalStatus(TerminalStatus& status);
 
   /// Read both implemented registers in sequence.
+  /// Register readback proves volatile register contents only. It does not prove
+  /// physical analog movement when WLAT, SHDN, or external circuitry overrides output.
+  /// The caller's snapshot is updated only after both reads succeed.
   /// @param snapshot Receives Wiper 0 and TCON0 values.
   /// @return Status::Ok() only if both reads succeed.
   Status readSnapshot(RegisterSnapshot& snapshot);
@@ -382,7 +521,8 @@ public:
   /// Write a documented volatile register directly.
   /// @param reg Register address; only writable volatile registers are accepted.
   /// @param value Raw value. TCON0 writes are sanitized.
-  /// @return Status::Ok() after the write is ACKed and cached.
+  /// @return Status::Ok() after the write is ACKed and cached. Ambiguous transport failures
+  /// mark affected volatile cache unknown and set hardwareStateUncertain().
   Status writeRegister(uint8_t reg, uint8_t value);
 
   /// Read the register addressed by the device's current address pointer.
@@ -395,23 +535,31 @@ public:
   // =========================================================================
 
   /// Broadcast a Wiper 0 write using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @param code Raw wiper code to broadcast.
   /// @return Status::Ok() if the broadcast write was ACKed by the bus.
   Status generalCallWriteWiper(uint8_t code);
 
   /// Broadcast a TCON0 write using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local TCON cache is marked unknown because ACK is not device-specific.
   /// @param value Raw TCON0 value; reserved bits are sanitized before broadcast.
   /// @return Status::Ok() if the broadcast write was ACKed by the bus.
   Status generalCallWriteTcon(uint8_t value);
 
   /// Broadcast a Wiper 0 increment using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @return Status::Ok() if the broadcast command was ACKed by the bus.
   Status generalCallIncrementWiper();
 
   /// Broadcast a Wiper 0 decrement using the General Call address.
+  /// Requires Config::allowGeneralCall. General Call is unsafe on shared buses
+  /// without isolated-bus evidence or documented risk acceptance.
   /// On ACK, the local Wiper cache is marked unknown because ACK is not device-specific.
   /// @return Status::Ok() if the broadcast command was ACKed by the bus.
   Status generalCallDecrementWiper();
@@ -424,7 +572,7 @@ private:
   Status _i2cWriteReadTracked(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                               uint8_t* rxBuf, size_t rxLen);
   Status _i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len);
-  Status _busResetTracked(bool trackSuccess);
+  Status _busResetTracked();
 
   // Register helpers
   Status _readRegisterRaw(uint8_t reg, uint8_t& value);
@@ -435,6 +583,28 @@ private:
   Status _sendWiperStepCommand(cmd::Command command, uint8_t steps);
   Status _generalCallWrite(uint8_t commandByte, const uint8_t* data, size_t len);
 
+  struct ActiveJob {
+    JobSnapshot snapshot;
+    Terminal terminal = Terminal::A;
+    bool terminalEnabled = false;
+    uint8_t target = 0;
+    uint8_t temp = 0;
+    uint8_t phase = 0;
+    uint8_t remainingSteps = 0;
+    cmd::Command stepCommand = cmd::Command::Increment;
+    bool recoverStartedOffline = false;
+  };
+
+  // Poll-job helpers
+  Status _startJob(JobType type, bool outputChanging, uint8_t instructionsPlanned,
+                   bool allowOffline = false);
+  Status _startStepJob(JobType type, cmd::Command command, uint8_t steps);
+  Status _pollJobOneInstruction();
+  bool _jobRunsSingleInstructionPerPoll() const;
+  void _completeJob(const Status& st);
+  void _resetJob();
+  Status _jobBusyStatus() const;
+
   // Validation and state helpers
   static bool _isValidAddress(uint8_t address);
   static bool _isPrimaryAddress(uint8_t address);
@@ -443,10 +613,15 @@ private:
   static bool _isValidRegister(uint8_t reg);
   static bool _isWritableRegister(uint8_t reg);
   static bool _isValidWiperCode(uint8_t code, Resolution resolution);
+  static Status _presenceReadFailureStatus(const Status& st);
   static uint8_t _terminalMask(Terminal terminal);
   static uint8_t _tconForMode(TerminalMode mode);
   void _syncRegister(uint8_t reg, uint8_t value);
   void _clearCachedRegisters();
+  static bool _isAmbiguousStateWriteFailure(const Status& st);
+  void _markHardwareStateUncertain(const Status& st, bool wiperAffected, bool tconAffected);
+  void _markRegisterReadbackVerified(uint8_t reg);
+  void _clearHardwareStateUncertainty();
 
   // Health management
   Status _offlineStatus() const;
@@ -462,6 +637,8 @@ private:
   uint32_t _lastOkMs = 0;
   uint32_t _lastErrorMs = 0;
   Status _lastError = Status::Ok();
+  bool _hardwareStateUncertain = false;
+  Status _hardwareStateUncertainError = Status::Ok();
   uint8_t _consecutiveFailures = 0;
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
@@ -470,8 +647,12 @@ private:
   uint8_t _cachedWiper = 0;
   bool _cachedTconKnown = false;
   uint8_t _cachedTcon = cmd::TCON_DEFAULT;
-  bool _addressPointerKnown = true;
+  bool _wiperReadbackRequiredForUncertainty = false;
+  bool _tconReadbackRequiredForUncertainty = false;
+  bool _addressPointerKnown = false;
   uint8_t _addressPointer = cmd::REG_WIPER0;
+
+  ActiveJob _job;
 };
 
 }  // namespace MCP45HVX1

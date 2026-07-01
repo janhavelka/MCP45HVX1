@@ -107,7 +107,9 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
                         ? (100.0f * static_cast<float>(totalSuccess) /
                            static_cast<float>(total))
                         : 0.0f;
-  const bool dirty = !snap.cachedWiperKnown || !snap.cachedTconKnown || !dev.isOnline();
+  const bool uncertain =
+      snap.hardwareStateUncertain || !snap.cachedWiperKnown || !snap.cachedTconKnown ||
+      !dev.isOnline();
   out.printf("MCP45HVX1 state: %s%s%s online=%s%s%s addr=0x%02X variant=%s ",
              LOG_COLOR_STATE(dev.isOnline(), dev.consecutiveFailures()),
              stateName(dev.state()),
@@ -127,12 +129,15 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
   } else {
     out.printf("tcon=unknown ");
   }
-  out.printf("failures=%s%u%s dirty=%s%s%s ok=%s%lu%s fail=%s%lu%s rate=%s%.1f%%%s lastErr=%s%s%s(%u)\n",
+  out.printf("failures=%s%u%s uncertain=%s%s%s dirty=%s%s%s ok=%s%lu%s fail=%s%lu%s rate=%s%.1f%%%s lastErr=%s%s%s(%u)\n",
              failureColor(dev.consecutiveFailures()),
              static_cast<unsigned>(dev.consecutiveFailures()),
              LOG_COLOR_RESET,
-             dirty ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
-             dirty ? "yes" : "no",
+             uncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+             uncertain ? "yes" : "no",
+             LOG_COLOR_RESET,
+             uncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+             uncertain ? "yes" : "no",
              LOG_COLOR_RESET,
              successColor(totalSuccess),
              static_cast<unsigned long>(totalSuccess),

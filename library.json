@@ -1,7 +1,7 @@
 {
   "name": "MCP45HVX1",
   "version": "1.0.0",
-  "description": "Production-grade MCP45HVX1 high-voltage I2C digital potentiometer driver.",
+  "description": "Framework-neutral MCP45HVX1 high-voltage I2C digital potentiometer driver.",
   "keywords": [
     "mcp45hvx1",
     "mcp45hv31",
@@ -47,5 +47,39 @@
   "build": {
     "includeDir": "include",
     "srcDir": "src"
+  },
+  "export": {
+    "include": [
+      "include/**",
+      "src/**",
+      "examples/**",
+      "scripts/generate_version.py",
+      "CMakeLists.txt",
+      "idf_component.yml",
+      "library.json",
+      "platformio.ini",
+      "README.md",
+      "CHANGELOG.md",
+      "LICENSE",
+      "SECURITY.md",
+      "CONTRIBUTING.md",
+      "ASSUMPTIONS.md",
+      "MCP45HVX1_digital_potentiometer_implementation_manual.md",
+      "docs/*.md"
+    ],
+    "exclude": [
+      ".github/**",
+      ".pio/**",
+      "prompts/**",
+      "docs/prompts/**",
+      "test/**",
+      "tests/**",
+      "tools/**",
+      "docs/**/*.pdf",
+      "docs/reports/**",
+      "*.tar.gz",
+      "*.tgz",
+      "*.zip"
+    ]
   }
 }

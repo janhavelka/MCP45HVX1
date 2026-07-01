@@ -1,7 +1,14 @@
 # MCP45HVX1 Driver Library
 
-Production-grade MCP45HVX1 high-voltage I2C digital potentiometer driver for
-ESP32 (Arduino/PlatformIO and ESP-IDF).
+Framework-neutral, production-oriented MCP45HVX1 high-voltage I2C digital
+potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). This hardening
+branch focuses on industry-readiness software behavior, documentation, tests,
+and evidence gates.
+
+Current release status: v1.0.0 pre-production software package. Local software
+validation and an ESP32-S2 safe-only HIL run have passed, but this is not a
+production-readiness, analog-accuracy, high-voltage-safety, or General Call
+safety claim.
 
 ## Features
 
@@ -9,13 +16,13 @@ ESP32 (Arduino/PlatformIO and ESP-IDF).
 - **Health monitoring** - READY/DEGRADED/OFFLINE state tracking
 - **Volatile register API** - Wiper 0 and TCON0 read/write helpers
 - **Wiper commands** - direct write plus documented INC/DEC commands
-- **Terminal control** - potentiometer, rheostat, floating wiper, and software shutdown presets
+- **Terminal control** - potentiometer, rheostat, floating wiper, and TCON software shutdown presets
 - **General Call helpers** - broadcast wiper/TCON write and wiper INC/DEC frames, with explicit `GCEN` caveats
 - **Bus-interface reset hook** - optional board callback for the documented software-reset/bus-release sequence
 - **Variant helpers** - 7-bit/8-bit code limits, terminal-current limits, nominal resistance, and position conversion helpers
 - **Comprehensive bring-up CLI** - colored diagnostics, safe read-only stress, explicit output-changing commands, and General Call gating
 - **Deterministic behavior** - no heap allocation in the core driver
-- **Settings snapshot** - runtime config, cache, and health counters
+- **Settings snapshot** - runtime config, cache, uncertainty, and health counters
 - **Native tests** - fake-bus protocol tests for register and command behavior
 
 ## Installation
@@ -53,8 +60,13 @@ The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 `vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
 sources or compatibility facades.
 
-Validation status: command parity is checked by repo-local contract scripts.
-Hardware smoke tests are still pending until target devices are available.
+Software validation status: command parity is checked by repo-local contract
+scripts. The pure ESP-IDF build is configured in CI; local `idf.py` may be
+absent on developer machines, so local IDF build success must not be claimed
+unless an actual `idf.py` log is recorded. The latest bundled HIL evidence is a
+safe-only ESP32-S2 Arduino/PlatformIO CLI run; pure ESP-IDF hardware smoke,
+output-changing, analog, high-voltage, and General Call validation remain
+separate evidence gates.
 
 ## Quick Start
 
@@ -104,18 +116,57 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
 ### Lifecycle
 
-- `Status begin(const Config& config)` - validate config, read Wiper/TCON, optionally apply configured initial values
+- `Status begin(const Config& config)` - validate config, read Wiper/TCON first, then apply explicit output-changing startup writes if enabled
 - `void tick(uint32_t nowMs)` - no-op reserved hook
 - `void end()` - reset driver object state without changing device terminals
 
 ### Diagnostics
 
-- `Status probe()` - raw Wiper read without health-counter updates
-- `Status recover()` - tracked Wiper/TCON reads to refresh cache and health
-- `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback
+- `Status probe()` - raw Wiper read without health-counter or Wiper/TCON cache updates
+- `Status recover()` - tracked Wiper/TCON reads to refresh cache, clear verified uncertainty, and return READY only after both reads succeed
+- `Status resetI2cState()` - run optional board-provided I2C bus/software-reset callback without proving device READY
 - `Status restorePowerOnDefaults()` / `resetToDefaults()` - write documented volatile defaults
+- `Status readSnapshot(RegisterSnapshot& snapshot)` - read Wiper then TCON and publish the caller snapshot only after both reads succeed
 - `SettingsSnapshot getSettings()` - config, cache, and health snapshot
+- `Status getSettings(SettingsSnapshot& out)` - output-parameter snapshot form matching sibling drivers
+- `DriverState state()` / `driverState()` - current health state
+- `bool isInitialized()` / `isOnline()` - lifecycle and health convenience checks
+- `const Config& getConfig()` - active copied configuration
+- `bool hardwareStateUncertain()` - true after an ambiguous state-changing write failure until readback verifies affected state
+- `Status hardwareStateUncertainError()` - last ambiguous failure that set hardware uncertainty
 - `DeviceInfo getDeviceInfo()` - active address, resolution, nominal RAB, step size, terminal-current limit, defaults
+- `SiliconErrataInfo siliconErrataInfo()` - static DS80000649B errata summary for diagnostics and release gates
+- `lastOkMs()`, `lastErrorMs()`, `lastError()`, `consecutiveFailures()`, `totalFailures()`, `totalSuccess()` - tracked health counters and timestamps
+
+### Poll-Chunked Jobs
+
+The synchronous raw APIs remain available, but side-effecting or multi-step
+work can also be driven as explicit jobs:
+
+- `Status startSetWiperJob(uint8_t code)`
+- `Status startReadSnapshotJob()`
+- `Status startSetTerminalJob(Terminal terminal, bool enabled)`
+- `Status startIncrementWiperJob(uint8_t steps = 1)`
+- `Status startDecrementWiperJob(uint8_t steps = 1)`
+- `Status startRecoverJob()`
+- `Status pollJob(uint32_t nowMs, uint8_t maxInstructions)`
+- `JobSnapshot getJobSnapshot()`
+- `Status getJobSnapshot(JobSnapshot& out)`
+- `bool jobActive()`
+
+A register read or command-write chunk is counted as one instruction.
+`startReadSnapshotJob()` reads Wiper then TCON as separate instructions.
+`startSetTerminalJob()` exposes the TCON read-modify-write as separate read and
+write phases, and completes after the read if the requested bit already matches.
+Wiper step jobs split requests into bounded command chunks and execute at most
+one chunk per poll. `startSetWiperJob()` is always one instruction.
+
+While a job is active, other bus-touching public APIs return `Err::BUSY` so an
+application-owned I2C task can keep ordering explicit. Ambiguous output-changing
+job failures use the same hardware-uncertainty and cache-invalidating semantics
+as the synchronous APIs. `startRecoverJob()` is the only job that may be started
+while OFFLINE; if it starts offline, the offline latch remains asserted until
+both Wiper and TCON readback instructions succeed.
 
 ### Wiper
 
@@ -126,9 +177,16 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `uint8_t codeFromFraction(float fraction, Resolution resolution)`
 - `float fractionFromCode(uint8_t code, Resolution resolution)`
 - `Status readWiperFraction(float& fraction)`
-- `Status writeWiperFraction(float fraction)`
+- `Status writeWiperFraction(float fraction)` - rejects values outside `0.0..1.0`
+- `maxWiperCode()`, `defaultWiperCode()`, `nominalResistanceOhms()` - variant and ordering helpers
 - `stepResistanceOhms()`, `resistanceBToWOhms()`, `resistanceAToWOhms()` - ideal helper math only
 - `maxTerminalCurrentMilliAmps()` - datasheet terminal-current limit by RAB option
+
+`codeFromFraction()` clamps helper input to the configured resolution and
+`fractionFromCode()` clamps raw codes before converting to a normalized value.
+`writeWiperFraction()` is output-changing and rejects values outside the
+inclusive `0.0..1.0` range with `Err::INVALID_PARAM`; it sends no I2C write for
+out-of-range values.
 
 ### Terminal Control
 
@@ -142,6 +200,7 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 - `Status getTerminalMode(TerminalMode& mode)`
 - `Status readTerminalStatus(TerminalStatus& status)`
 - `TerminalStatus decodeTcon(uint8_t value)`
+- `uint8_t sanitizeTcon(uint8_t value)` - force reserved TCON bits `[7:4]` high before writes
 
 `TerminalMode::Custom` is returned for valid TCON bit combinations that do not
 match a named preset. It is a decoded state, not a valid argument to
@@ -161,10 +220,57 @@ match a named preset. It is a decoded state, not a valid argument to
 - `Status generalCallDecrementWiper()`
 
 The datasheet references a `GCEN` bit but the extracted register location is not
-documented. This library sends only the documented General Call frames. Because
-General Call ACKs are broadcast and not device-specific, successful General Call
-helpers mark the affected local cache entry unknown; call `readSnapshot()` to
-verify local state afterward.
+documented. This library sends only the documented General Call frames, and the
+core helpers are disabled unless `Config::allowGeneralCall` is explicitly true.
+Because General Call ACKs are broadcast and not device-specific, successful
+General Call helpers mark the affected local cache entry unknown; call
+`readSnapshot()` to verify local state afterward.
+
+Production firmware must treat General Call as a release-gated feature. Review
+`DS80000649B` and any newer errata against the actual package marking/date code
+before release. Output-changing General Call commands require isolated-bus
+evidence, or a documented risk acceptance for affected or unknown silicon.
+Shared-bus deployments must not claim General Call safety without logged
+evidence and signoff.
+
+The Arduino and ESP-IDF diagnostic CLIs opt into the core General Call helpers
+so their `gc arm` command can remain functional. That opt-in is not a
+production bus-manager policy; it is paired with one-shot arming, warnings, and
+evidence requirements in the examples.
+
+## Uncertain Hardware State
+
+MCP45HVX1 Wiper and TCON writes can change real analog and high-voltage
+circuits. If a state-changing transaction reaches the I2C bus and then returns
+an ambiguous transport failure, the driver preserves the original `Status` and
+marks the affected cache unknown. `SettingsSnapshot::hardwareStateUncertain`
+and `hardwareStateUncertain()` remain true until successful readback verifies
+every affected volatile register.
+
+Validation failures before I2C access, unsupported commands, offline `BUSY`,
+device-not-found/register-mismatch results, and address NACKs do not set this
+flag. Generic I2C failures, data NACKs, timeouts, and bus errors can mean bytes
+were accepted before the host observed failure, so they set uncertainty for the
+affected Wiper or TCON state. `resetI2cState()` does not clear uncertainty; use
+`readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` to perform real
+readback/resync.
+
+`codeFromFraction()` is a pure conversion helper and clamps out-of-range input
+to the nearest endpoint. `writeWiperFraction()` is output-changing and rejects
+out-of-range or NaN input with `Err::INVALID_PARAM` instead of clamping, so
+caller mistakes do not silently drive high-voltage analog output to an endpoint.
+
+`begin()` uses the same uncertainty model for optional startup writes. Baseline
+Wiper/TCON reads must succeed before any configured startup write is attempted.
+If an optional startup write then fails, `begin()` returns the original error
+but preserves the runtime config and initialized transport state so
+`readWiper()`, `readTcon()`, `readSnapshot()`, or `recover()` can inspect the
+possibly changed volatile hardware state.
+
+For `begin()` and `probe()` presence checks, a definite address NACK is reported
+as `Err::DEVICE_NOT_FOUND` with the callback detail value preserved. Timeouts,
+bus errors, data NACKs, generic I2C errors, and register-format mismatches are
+returned with their original public status code.
 
 ## Configuration
 
@@ -174,14 +280,15 @@ verify local state afterward.
 | `resolution` | `Bits8` | `Bits8` for MCP45HV51, `Bits7` for MCP45HV31 |
 | `resistance` | `R10K` | Nominal RAB option for helper math |
 | `allowAlternateAddressRange` | `false` | Opt-in disputed `0x5C-0x5F` address range |
+| `allowGeneralCall` | `false` | Explicit opt-in for unsafe broadcast General Call helpers |
 | `i2cTimeoutMs` | `50` | Transport timeout |
 | `busReset` | `nullptr` | Optional board callback for I2C bus/software reset |
 | `controlUser` | `nullptr` | Context pointer for `busReset` |
-| `writeInitialWiper` | `false` | Opt-in Wiper write during `begin()` |
-| `initialWiperCode` | `0x7F` | Wiper value used when opt-in write is enabled |
-| `writeInitialTcon` | `false` | Opt-in TCON write during `begin()` |
-| `initialTcon` | `0xFF` | TCON value used when opt-in write is enabled |
-| `requirePowerOnDefaults` | `false` | Require POR/BOR Wiper and TCON defaults during `begin()` |
+| `writeInitialWiper` | `false` | Explicit output-changing Wiper write during `begin()` |
+| `initialWiperCode` | `0x7F` | Wiper value used when startup Wiper write is enabled |
+| `writeInitialTcon` | `false` | Explicit output-changing TCON write during `begin()` |
+| `initialTcon` | `0xFF` | TCON value used when startup TCON write is enabled |
+| `requirePowerOnDefaults` | `false` | Require Wiper/TCON readback to equal POR/BOR defaults during `begin()` |
 | `requireReadMsbZero` | `true` | Enforce documented read MSB byte `0x00` |
 | `offlineThreshold` | `5` | Consecutive tracked failures before OFFLINE |
 
@@ -189,48 +296,97 @@ verify local state afterward.
 
 The core driver is synchronous and transport-agnostic. It does not allocate heap
 memory or own an Arduino `Wire` instance; callers inject I2C callbacks through
-`Config`. Calls are not internally locked, so share one driver instance from a
-single task/thread at a time or serialize access in the application.
+`Config`. Callback pointers and `i2cUser`/`controlUser`/`timeUser` contexts are
+non-owning and must outlive every driver call that can use them. Calls are not
+internally locked, so share one driver instance from a single task/thread at a
+time or serialize access in the application.
 
 The public API is not ISR-oriented. I2C transports, callbacks, and optional bus
 reset hooks are expected to run from normal task context where blocking I2C
 transactions and timeout handling are acceptable.
 
+`MCP45HVX1` objects are not copyable or movable. A driver instance owns runtime
+health counters, volatile register-cache knowledge, and non-owning callback
+contexts; create one instance per physical device/bus binding.
+
 Health tracking is latched at `DriverState::OFFLINE`: after the configured
 consecutive tracked-failure threshold is reached, normal public I2C operations
 return `Err::BUSY` with `Driver is offline; call recover()` and do not call the
 I2C transport. `probe()` may still perform a raw presence check without changing
-health counters. `resetI2cState()` may run the configured bus-reset callback but
-does not by itself mark the device recovered while already OFFLINE. Call
-`recover()` to perform tracked Wiper/TCON reads, refresh caches, and return to
-READY on success.
+health counters, Wiper/TCON cache state, or READY/DEGRADED/OFFLINE state; the
+raw read may update address-pointer knowledge. `resetI2cState()` may run the
+configured bus-reset callback and records reset failures, but a
+successful callback is not device proof: it does not clear uncertainty, refresh
+cache, or mark a DEGRADED/OFFLINE driver READY. Call `recover()` or perform a
+tracked device read to prove the device responds.
+
+`recover()` does not run the bus-reset callback. It reads Wiper first and TCON
+second using tracked transactions. Both reads must succeed before it returns OK
+and READY; readback clears hardware uncertainty only for the volatile registers
+that were verified. If recovery starts from OFFLINE and only partially succeeds,
+the OFFLINE latch is restored.
+
+Hardware uncertainty is separate from `DriverState`. A device can be READY while
+the analog state is still uncertain after an ambiguous failed Wiper/TCON or
+General Call write. Inspect `cachedWiperKnown`, `cachedTconKnown`,
+`hardwareStateUncertain`, and `hardwareStateUncertainError` before trusting the
+physical output after a write failure.
 
 ## Device Notes
 
 - The implemented registers are `0x00` Wiper 0 and `0x04` TCON0. All other
   addresses are treated as reserved.
+- MCP45HV31 is the 7-bit/128-tap variant with full-scale code `0x7F` and
+  POR/BOR Wiper default `0x3F`. MCP45HV51 is the 8-bit/256-tap variant with
+  full-scale code `0xFF` and POR/BOR Wiper default `0x7F`.
 - Reads return two bytes on the bus. The driver checks that the first byte is
   `0x00` and returns the second byte as the register value.
-- `WLAT` affects the physical wiper update, not I2C command acceptance.
-- `SHDN` overrides terminal connectivity but does not corrupt registers.
+- TCON0 is register `0x04`; reserved bits `[7:4]` are forced high on writes and
+  expected high on readback. TCON POR/BOR default is `0xFF`.
+- `WLAT` is a hardware pin. When high, it can hold physical wiper movement even
+  though Wiper register writes are accepted and read back.
+- `SHDN` is an external active-low hardware pin. It overrides terminal
+  connectivity but does not corrupt Wiper/TCON registers. Core APIs named
+  `shutdown` control TCON software shutdown via R0HW, not the SHDN pin.
+- Register readback proves volatile Wiper/TCON contents only. It does not prove
+  physical analog movement when WLAT is high, SHDN is asserted, or external
+  circuitry overrides the output.
 - `begin()` does not write the analog state by default. Enable the initial-write
   flags only when that startup behavior is intentional.
+- Optional startup writes are two-phase: read Wiper/TCON first, then write TCON
+  before Wiper if enabled. A failed optional write can leave the driver
+  initialized but degraded/uncertain so the application can read back or recover.
+- DS20005304B specifies `TBORD`, delay after device exits reset state with
+  `VL > VBOR`, as 10 us typical and 20 us maximum. No separate `tPOR` ready
+  delay is identified in the local datasheet extract. The core does not own rail
+  sequencing, reset supervision, SHDN/WLAT pins, or startup delays; applications
+  must ensure digital and analog rails and pins are stable before `begin()`.
+  `Config::nowMs` is used for health timestamps, not for delay during
+  `begin()` or `recover()`.
 
 ## Address Note
 
 DS20005304B Rev B Table 6-2 and the official PDF text give fixed address bits
-`01111`, so the default address range is `0x3C-0x3F`. The extracted markdown in
-`docs/08_variant_differences_and_open_questions.md` records an apparent
-`0x5C-0x5F` conflict from command figures. The driver defaults to `0x3C` and
-accepts `0x5C-0x5F` only when `Config::allowAlternateAddressRange` is explicitly
-enabled for hardware-verification builds. See `ASSUMPTIONS.md`.
+`01111`, so the default address range is `0x3C-0x3F`. The maintained device
+reference records an apparent `0x5C-0x5F` conflict from command figures. The
+driver defaults to `0x3C` and accepts `0x5C-0x5F` only when
+`Config::allowAlternateAddressRange` is explicitly enabled for
+hardware-verification builds. See `ASSUMPTIONS.md` and
+`docs/DEVICE_REFERENCE.md`.
 
-Hardware validation should verify the populated A1/A0 address, the WLAT and SHDN
-board strap behavior, General Call enablement, and the analog terminal limits for
-the selected RAB option. The helper math is idealized and does not include
-tolerance, wiper resistance, leakage, INL/DNL, or board-level loading.
+Hardware validation must verify the populated A1/A0 address, silicon marking
+and errata applicability, WLAT and SHDN board strap behavior, General Call
+isolation or documented risk acceptance, and analog terminal limits for the
+selected RAB option. Opt-in startup writes and other output-changing tests must
+be measured on a safe load and restored before production use. The helper math
+is idealized and does not include tolerance, wiper resistance, leakage, INL/DNL,
+or board-level loading.
 
 ## Examples
+
+The bundled examples are diagnostic bring-up tools. They are not production bus
+managers: production firmware must own bus locking, reset policy, timeout
+policy, rails, SHDN/WLAT pins, safe-load decisions, and any operator gating.
 
 ### 01_basic_bringup_cli
 
@@ -262,9 +418,11 @@ indented rows:
   Terminals: A=yes W=yes B=yes
 ```
 
-Use `state` for the parseable one-line state summary, `drv` or `health` for
-detailed driver health, and `detail`, `cfg`, or `settings` for configuration and
-cache snapshots. Raw hardware-oriented output is kept behind explicit commands:
+Use `state` for the parseable one-line state summary, including
+`uncertain=yes/no`; `drv` or `health` for detailed driver health and the last
+uncertainty error; and `detail`, `cfg`, or `settings` for configuration and
+explicit Wiper/TCON cache-known flags. Raw hardware-oriented output is kept
+behind explicit commands:
 `raw`/`dump` adds the last-address pointer, `reg`/`rreg` read direct registers,
 and `raw write`/`wreg` write volatile registers. `color off` disables ANSI escape
 codes for logs, and `verbose on` enables per-operation details during
@@ -325,7 +483,63 @@ Native ESP-IDF build of the bring-up CLI command contract. It uses
 buffers. The example explicitly supports the MCP45HVX1 last-address read format
 (`txLen == 0`) and General Call writes to address `0x00` using ESP-IDF defined
 I2C operations with manual address bytes. `tools/check_idf_example_contract.py`
-rejects Arduino compatibility facades and checks the native IDF command surface.
+rejects Arduino compatibility facades, placeholder command behavior, unsafe
+parse-to-byte casts, no-op color support, and selftest-output mismatches.
+
+The IDF CLI uses bounded command parsers before all byte-sized writes, has
+optional ANSI color via `color on|off`, reports uncertainty/cache-known fields
+in `state`, `drv`/`health`, and `cfg`, and implements `selftest output` as an
+explicit output-changing, state-restoring test. `gc arm` prints bus-wide,
+DS80000649B, and isolated-bus-evidence warnings before enabling one broadcast
+General Call command.
+
+## HIL Evidence Capture
+
+`tools/run_hil_mcp45hvx1.py` captures attachable hardware-in-loop evidence from
+the Arduino or ESP-IDF CLI over serial. The default sequence is safe/read-only:
+`version`, `color off`, `help`, `scan`, `addr`, optional address selection,
+`probe`, `cfg`, `settings`, `state`, `drv`, `health`, `readwiper`,
+`readtcon`, `dump`, `selftest safe`, `stress 100`, final `state`, and final
+`drv`.
+
+```bash
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-output-change --operator-prompts
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C --include-general-call --confirm-isolated-bus --operator-prompts
+```
+
+Output-changing groups require explicit flags and `--operator-prompts`; the
+operator must confirm a safe load and measurement setup before local Wiper/TCON
+changes run. `--include-output-change` captures Wiper/TCON baseline, writes
+bounded values, reads back, restores the baseline, and reports
+`FAIL_RESTORE_UNCERTAIN` if restore cannot be verified.
+`--include-shdn` and `--include-wlat` require `--operator-prompts` because
+physical pin behavior must be observed separately from register readback.
+`--include-general-call` requires `--confirm-isolated-bus` and
+`--operator-prompts` so the operator confirms the isolated bus and safe-load
+setup before any broadcast command is sent. The runner records the
+errata/isolation warning in the evidence.
+
+Each run writes `hil_logs/mcp45hvx1_<timestamp>/` with `raw_serial.txt`,
+`commands.txt`, `summary.json`, `report.md`, and `operator_notes.md`.
+Hardware validation is not claimed unless the HIL runner was actually run and
+the resulting evidence bundle is attached to the release or validation record.
+The HIL runner is repository tooling and is excluded from normal PlatformIO
+package exports; use the full repository when capturing HIL evidence.
+
+Current bundled safe-only evidence:
+
+- [8-hour ESP32-S2 safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md):
+  `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency
+  `0.188 s`, no output-changing groups requested.
+- [1-hour panic-repro safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md):
+  `PASS_SAFE_ONLY`, `23056 / 23056 / 0` soak commands.
+
+These reports support safe/read-only CLI behavior on the recorded fixture only.
+They do not support analog movement, terminal-current, high-voltage, SHDN/WLAT,
+rail-cycle, fault-injection, or General Call safety claims.
+The report markdown files are repository/release-source evidence and are not
+included in the normal PlatformIO package archive.
 
 ## Running Tests
 
@@ -336,30 +550,46 @@ to add a separate `Wire` dependency.
 
 ```bash
 python tools/validate.py
+python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio test -e native
 python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
+python tools/check_generated_artifacts.py
+python tools/test_run_hil_mcp45hvx1_parser.py
 python scripts/generate_version.py check
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
 cd examples/espidf_basic
+idf.py set-target esp32s3
 idf.py build
 ```
 
+## Packaging
+
+`library.json` defines the package export policy. Normal PlatformIO packages
+include headers, source, examples, metadata, and current core docs. Large
+reference PDFs, extracted datasheet markdown, tests, tools, CI metadata, and
+local build output are intentionally excluded from normal packages to keep the
+install artifact focused and reproducible. HIL tooling and generated HIL report
+markdown under `docs/reports/` are also repo-only. The full reference corpus
+and release-preparation tooling remain in the repository for audit,
+documentation, validation, and release work.
+
 ## Documentation
 
+- [Docs Index](docs/README.md)
 - [Assumptions](ASSUMPTIONS.md)
 - [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
-- <a href="docs/05_register_map.md">Register Map</a>
-- <a href="docs/register_reference.md">Driver Register Reference</a>
-- <a href="docs/hardware_validation.md">Hardware Validation Checklist</a>
-- [ESP-IDF Port Notes](docs/IDF_PORT.md)
-- [ESP-IDF Port Implementation Notes](docs/IDF_PORT_IMPLEMENTATION.md)
-- <a href="docs/MCP45HVX1_CLI_PARITY_AND_COLOR_REPORT.md">CLI Parity And Color Report</a>
-- <a href="docs/04_protocol_commands_and_transactions.md">Protocol Commands</a>
-- <a href="docs/07_initialization_reset_and_operational_notes.md">Initialization Notes</a>
+- <a href="docs/DEVICE_REFERENCE.md">Device Reference</a>
+- <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
+- <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
+- <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
+- <a href="docs/RELEASE_NOTES_v1.0.0.md">v1.0.0 Release Notes</a>
+- <a href="docs/IDF_PORT.md">ESP-IDF Port</a>
+- <a href="docs/HARDENING_SUMMARY.md">Hardening Summary</a>
 - `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
   and the native IDF entry point.
 

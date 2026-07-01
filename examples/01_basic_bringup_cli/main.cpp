@@ -56,6 +56,8 @@ struct StressStats {
 
 StressStats gStress;
 
+void printStateLine();
+
 const char* skipWs(const char* p) {
   while (p != nullptr && (*p == ' ' || *p == '\t')) {
     ++p;
@@ -493,6 +495,7 @@ MCP45HVX1::Config makeDefaultConfig() {
   cfg.nowMs = exampleNowMs;
   cfg.resolution = MCP45HVX1::Resolution::Bits8;
   cfg.resistance = MCP45HVX1::ResistanceOption::R10K;
+  cfg.allowGeneralCall = true;  // Diagnostic CLI has its own one-shot `gc arm` operator gate.
   return cfg;
 }
 
@@ -529,6 +532,9 @@ MCP45HVX1::Status beginDevice() {
   if (st.ok()) {
     gOutputStateUncertain = false;
     printActiveConfigLine();
+  } else if (gDev.hardwareStateUncertain()) {
+    LOGW("begin failed after a possible output-changing startup write; verify state");
+    printStateLine();
   }
   return st;
 }
@@ -592,7 +598,19 @@ void printErrataInfo() {
                     cli::yesNoColor(info.uniqueBusWorkaroundForAffectedSilicon),
                     log_bool_str(info.uniqueBusWorkaroundForAffectedSilicon),
                     LOG_COLOR_RESET);
-  LOG_SERIAL.println("  Source: docs/MCP45HVX1_Errata_DS80000649B.pdf");
+  LOG_SERIAL.printf("  Production release gate required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.productionReleaseGateRequired ? 1U : 0U),
+                    log_bool_str(info.productionReleaseGateRequired),
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Shared-bus risk acceptance required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.sharedBusRiskAcceptanceRequired ? 1U : 0U),
+                    log_bool_str(info.sharedBusRiskAcceptanceRequired),
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  General Call isolated-bus evidence required: %s%s%s\n",
+                    cli::warningIfNonZeroColor(info.generalCallRequiresIsolatedBusEvidence ? 1U : 0U),
+                    log_bool_str(info.generalCallRequiresIsolatedBusEvidence),
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.println("  Source: docs/reference-pdfs/MCP45HVX1_Errata_DS80000649B.pdf");
 }
 
 void printTerminalStatus(uint8_t tcon) {
@@ -659,7 +677,8 @@ void dumpRegisters() {
 }
 
 bool hardwareStateUncertain(const MCP45HVX1::SettingsSnapshot& s) {
-  return gOutputStateUncertain || !s.cachedWiperKnown || !s.cachedTconKnown || !gDev.isOnline();
+  return s.hardwareStateUncertain || gOutputStateUncertain ||
+         !s.cachedWiperKnown || !s.cachedTconKnown || !gDev.isOnline();
 }
 
 void printStateLine() {
@@ -686,8 +705,11 @@ void printStateLine() {
   } else {
     LOG_SERIAL.print("tcon=unknown ");
   }
-  LOG_SERIAL.printf("failures=%u dirty=%s%s%s\n",
+  LOG_SERIAL.printf("failures=%u uncertain=%s%s%s dirty=%s%s%s\n",
                     static_cast<unsigned>(s.consecutiveFailures),
+                    dirty ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    dirty ? "yes" : "no",
+                    LOG_COLOR_RESET,
                     dirty ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
                     dirty ? "yes" : "no",
                     LOG_COLOR_RESET);
@@ -766,6 +788,20 @@ void printDriverHealth() {
                     hardwareStateUncertain(s) ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
                     hardwareStateUncertain(s) ? "yes" : "no",
                     LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Core hardware uncertainty: %s%s%s\n",
+                    s.hardwareStateUncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    s.hardwareStateUncertain ? "yes" : "no",
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Last uncertainty code/detail: %s%s%s / %ld\n",
+                    s.hardwareStateUncertainError.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED,
+                    statusName(s.hardwareStateUncertainError.code),
+                    LOG_COLOR_RESET,
+                    static_cast<long>(s.hardwareStateUncertainError.detail));
+  if (!s.hardwareStateUncertainError.ok() &&
+      s.hardwareStateUncertainError.msg != nullptr &&
+      s.hardwareStateUncertainError.msg[0] != '\0') {
+    LOG_SERIAL.printf("  Last uncertainty message: %s\n", s.hardwareStateUncertainError.msg);
+  }
 }
 
 void printConfigSnapshot() {
@@ -784,6 +820,10 @@ void printConfigSnapshot() {
                     s.config.allowAlternateAddressRange ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
                     s.config.allowAlternateAddressRange ? "yes" : "no",
                     LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  General Call core opt-in: %s%s%s\n",
+                    s.config.allowGeneralCall ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    s.config.allowGeneralCall ? "yes" : "no",
+                    LOG_COLOR_RESET);
   LOG_SERIAL.printf("  Variant: %s (configured, not auto-detected)\n",
                     variantName(info.resolution));
   LOG_SERIAL.printf("  Resolution: %u-bit / %u taps\n",
@@ -796,9 +836,21 @@ void printConfigSnapshot() {
                     s.cachedTconKnown ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
                     s.cachedTcon,
                     LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  TCON cache known: %s%s%s\n",
+                    s.cachedTconKnown ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
+                    s.cachedTconKnown ? "yes" : "no",
+                    LOG_COLOR_RESET);
   LOG_SERIAL.printf("  Wiper cached: %s0x%02X%s\n",
                     s.cachedWiperKnown ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
                     s.cachedWiper,
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Wiper cache known: %s%s%s\n",
+                    s.cachedWiperKnown ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
+                    s.cachedWiperKnown ? "yes" : "no",
+                    LOG_COLOR_RESET);
+  LOG_SERIAL.printf("  Hardware state uncertain: %s%s%s\n",
+                    hardwareStateUncertain(s) ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    hardwareStateUncertain(s) ? "yes" : "no",
                     LOG_COLOR_RESET);
   LOG_SERIAL.println("  SHDN pin controlled by core: no");
   LOG_SERIAL.println("  WLAT pin controlled by core: no");
@@ -854,7 +906,7 @@ void printHelp() {
   cli::printHelpItem("inc [n] / dec [n]", "Step wiper with clamp at endpoints");
   cli::printHelpItem("tcon [value|default]", "Read or write raw TCON byte");
   cli::printHelpItem("term / terminal a|w|b [on|off]", "Read or set one terminal bit");
-  cli::printHelpItem("shutdown [on|off]", "Read or set software shutdown");
+  cli::printHelpItem("shutdown [on|off]", "Read or set TCON software shutdown, not SHDN pin");
   cli::printHelpItem("software-shutdown [on|off]", "Alias for shutdown");
   cli::printHelpItem("mode [pot|bw|aw|float|shutdown]", "Read or apply terminal preset");
   cli::printHelpItem("defaults", "Restore volatile POR/BOR defaults");
@@ -1174,7 +1226,7 @@ void handleShutdown(const char* args) {
     LOGE("usage: shutdown [0|1]");
     return;
   }
-  warnOutputChanging("shutdown");
+  warnOutputChanging("TCON software shutdown");
   const MCP45HVX1::Status st = gDev.setSoftwareShutdown(enabled);
   printStatus(st);
   if (st.ok()) {
@@ -1807,6 +1859,12 @@ void printStressSummary(uint32_t expectedAttempts) {
     printStatus(gStress.restoreStatus);
   }
 
+  MCP45HVX1::SettingsSnapshot finalSnapshot;
+  (void)gDev.getSettings(finalSnapshot);
+  LOG_SERIAL.printf("  Hardware uncertainty: %s%s%s\n",
+                    hardwareStateUncertain(finalSnapshot) ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    hardwareStateUncertain(finalSnapshot) ? "yes" : "no",
+                    LOG_COLOR_RESET);
   LOG_SERIAL.print("  Final ");
   health_view::printSummary(gDev);
 }

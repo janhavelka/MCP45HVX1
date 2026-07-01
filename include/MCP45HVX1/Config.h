@@ -71,7 +71,11 @@ enum class ResistanceOption : uint8_t {
 ///
 /// The core driver never accesses Arduino Wire directly. All bus operations go
 /// through the callbacks stored here so the same driver can be used from tests,
-/// Arduino examples, or another RTOS transport.
+/// Arduino examples, or another RTOS transport. Callback pointers and all user
+/// contexts are non-owning and must outlive the driver instance or every
+/// operation using this configuration. The core does not lock around callbacks;
+/// applications must serialize shared bus/driver access externally. Callbacks
+/// are expected to run from normal task/thread context, not an ISR.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
@@ -90,15 +94,16 @@ struct Config {
   Resolution resolution = Resolution::Bits8; ///< Device variant, MCP45HV51 by default
   ResistanceOption resistance = ResistanceOption::R10K; ///< Nominal RAB option for helper math
   bool allowAlternateAddressRange = false; ///< Allow disputed 0x5C-0x5F range for hardware checks
+  bool allowGeneralCall = false;       ///< Explicit opt-in for unsafe broadcast General Call helpers
 
   // === Optional Initialization Writes ===
-  bool writeInitialWiper = false;        ///< Write initialWiperCode during begin()
-  uint8_t initialWiperCode = 0x7F;       ///< Initial wiper code if writeInitialWiper is true
-  bool writeInitialTcon = false;         ///< Write initialTcon during begin()
-  uint8_t initialTcon = 0xFF;            ///< Initial TCON value if writeInitialTcon is true
+  bool writeInitialWiper = false;        ///< Output-changing Wiper write during begin() when true
+  uint8_t initialWiperCode = 0x7F;       ///< Wiper code for explicit startup write
+  bool writeInitialTcon = false;         ///< Output-changing TCON write during begin() when true
+  uint8_t initialTcon = 0xFF;            ///< TCON value for explicit startup write
 
   // === Startup Checks ===
-  bool requirePowerOnDefaults = false;   ///< Require POR/BOR defaults during begin()
+  bool requirePowerOnDefaults = false;   ///< Require readback to equal POR/BOR defaults during begin()
   bool requireReadMsbZero = true;        ///< Require readback MSB byte to be 0x00
 
   // === Health Tracking ===

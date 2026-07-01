@@ -52,6 +52,13 @@ struct Status {
   /// @return Status with Err::OK and a static "OK" message.
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }
 
+  /// Create an in-progress status.
+  /// @param message Static message string.
+  /// @return Status with Err::IN_PROGRESS and the provided message.
+  static constexpr Status InProgress(const char* message = "Operation in progress") {
+    return Status{Err::IN_PROGRESS, 0, message};
+  }
+
   /// Create an error status.
   /// @param err Error code.
   /// @param message Static error message string.
