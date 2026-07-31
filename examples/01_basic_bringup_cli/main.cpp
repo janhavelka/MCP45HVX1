@@ -544,6 +544,10 @@ void printVersion() {
   LOG_SERIAL.println("  Firmware: MCP45HVX1 bring-up CLI");
   LOG_SERIAL.printf("  Library: %s\n", MCP45HVX1::VERSION_FULL);
   LOG_SERIAL.printf("  Framework: %s\n", frameworkName());
+#if defined(ARDUINO_ARCH_ESP32)
+  LOG_SERIAL.printf("  Arduino-ESP32: %s\n", ESP.getCoreVersion());
+  LOG_SERIAL.printf("  ESP-IDF: %s\n", ESP.getSdkVersion());
+#endif
   LOG_SERIAL.printf("  Target: %s\n", targetName());
   LOG_SERIAL.printf("  Reset reason: %s\n", resetReasonName());
   LOG_SERIAL.printf("  CLI color: %s%s%s\n",

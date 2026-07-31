@@ -2,7 +2,23 @@
 
 ## Unreleased
 
-- No unreleased changes.
+### Changed
+
+- Upgraded Arduino example builds from pioarduino `platform-espressif32`
+  `54.03.20` (Arduino-ESP32 3.2.0 / ESP-IDF 5.4.1) to `55.03.311`
+  (Arduino-ESP32 3.3.11 / ESP-IDF 5.5.5).
+- Removed the forced PSRAM macro and original-ESP32 PSRAM cache workaround from
+  the declared no-PSRAM ESP32-S3 target.
+- Excluded repository-local `.pio` content explicitly from all source filters.
+- Added Arduino-ESP32 and ESP-IDF versions to the Arduino CLI `version` output
+  for build and HIL provenance.
+
+### Validation
+
+- Passed all 74 native tests, the aggregate repository validator, package
+  creation, and clean ESP32-S2/ESP32-S3 Arduino builds on pioarduino
+  `55.03.311`. Hardware/HIL and native ESP-IDF builds were not run in this
+  change.
 
 ## 1.0.0 - 2026-06-30
 

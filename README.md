@@ -544,9 +544,11 @@ included in the normal PlatformIO package archive.
 ## Running Tests
 
 The repository `platformio.ini` pins ESP32 example builds to pioarduino
-`platform-espressif32` 54.03.20. `Wire` is supplied by the Arduino ESP32
-framework; applications that consume this library through `lib_deps` do not need
-to add a separate `Wire` dependency.
+`platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11 with bundled ESP-IDF
+5.5.5), which requires PlatformIO Core 6.1.19 or newer. `Wire` is supplied by
+the Arduino ESP32 framework; applications that consume this library through
+`lib_deps` do not need to add a separate `Wire` dependency. The native ESP-IDF
+example and its CI build remain independently pinned to ESP-IDF 6.0.1.
 
 ```bash
 python tools/validate.py
