@@ -14,13 +14,9 @@ REQUIRED_COMMON = [
     "Log.h",
     "I2cTransport.h",
     "I2cScanner.h",
-    "CommandHandler.h",
-    "TransportAdapter.h",
-    "BusDiag.h",
     "CliShell.h",
     "CliStyle.h",
     "HealthView.h",
-    "HealthDiag.h",
 ]
 
 MANDATORY_COMMANDS = [
@@ -98,7 +94,7 @@ IDF_REQUIRED_COMPONENTS = [
 ]
 
 COMMAND_ACTIONS = {
-    "scan": "bus_diag::scan",
+    "scan": "i2c_scanner::scan",
     "color": "handleColor",
     "begin": "handleBegin",
     "addr": "handleAddress",

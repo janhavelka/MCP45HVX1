@@ -17,8 +17,6 @@ files:
     - "test/**/*"
     - "tests/**/*"
     - "tools/**/*"
-    - "prompts/**/*"
-    - "docs/prompts/**/*"
     - "docs/reports/**/*"
     - "examples/01_basic_bringup_cli/**/*"
     - "examples/common/**/*"

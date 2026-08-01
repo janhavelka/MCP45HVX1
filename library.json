@@ -64,14 +64,11 @@
       "SECURITY.md",
       "CONTRIBUTING.md",
       "ASSUMPTIONS.md",
-      "MCP45HVX1_digital_potentiometer_implementation_manual.md",
       "docs/*.md"
     ],
     "exclude": [
       ".github/**",
       ".pio/**",
-      "prompts/**",
-      "docs/prompts/**",
       "test/**",
       "tests/**",
       "tools/**",

@@ -86,43 +86,48 @@ inline void log_begin(unsigned long baud = 115200) {
 }
 
 // Colorize only the severity tag; keep message text in terminal default color.
-#define LOG_PRINT_WITH_TAG(tagColor, tag, fmt, ...) \
-  LOG_SERIAL.printf("%s[" tag "]%s " fmt "\n", tagColor, LOG_COLOR_RESET, ##__VA_ARGS__)
+// A variadic-only message argument keeps zero-format-argument calls valid C++17.
+#define LOG_PRINT_WITH_TAG(tagColor, tag, ...) \
+  do { \
+    LOG_SERIAL.printf("%s[" tag "]%s ", tagColor, LOG_COLOR_RESET); \
+    LOG_SERIAL.printf(__VA_ARGS__); \
+    LOG_SERIAL.print("\n"); \
+  } while (0)
 
 /// @brief Log error message (level >= 1)
-#define LOGE(fmt, ...) \
+#define LOGE(...) \
   do { \
-    if (LOG_LEVEL >= 1) LOG_PRINT_WITH_TAG(LOG_COLOR_RED, "E", fmt, ##__VA_ARGS__); \
+    if (LOG_LEVEL >= 1) LOG_PRINT_WITH_TAG(LOG_COLOR_RED, "E", __VA_ARGS__); \
   } while (0)
 
 /// @brief Log warning message (level >= 2)
-#define LOGW(fmt, ...) \
+#define LOGW(...) \
   do { \
-    if (LOG_LEVEL >= 2) LOG_PRINT_WITH_TAG(LOG_COLOR_YELLOW, "W", fmt, ##__VA_ARGS__); \
+    if (LOG_LEVEL >= 2) LOG_PRINT_WITH_TAG(LOG_COLOR_YELLOW, "W", __VA_ARGS__); \
   } while (0)
 
 /// @brief Log info message (level >= 2)
-#define LOGI(fmt, ...) \
+#define LOGI(...) \
   do { \
-    if (LOG_LEVEL >= 2) LOG_PRINT_WITH_TAG(LOG_COLOR_CYAN, "I", fmt, ##__VA_ARGS__); \
+    if (LOG_LEVEL >= 2) LOG_PRINT_WITH_TAG(LOG_COLOR_CYAN, "I", __VA_ARGS__); \
   } while (0)
 
 /// @brief Log debug message (level >= 3)
-#define LOGD(fmt, ...) \
+#define LOGD(...) \
   do { \
-    if (LOG_LEVEL >= 3) LOG_PRINT_WITH_TAG(LOG_COLOR_BLUE, "D", fmt, ##__VA_ARGS__); \
+    if (LOG_LEVEL >= 3) LOG_PRINT_WITH_TAG(LOG_COLOR_BLUE, "D", __VA_ARGS__); \
   } while (0)
 
 /// @brief Log trace message (level >= 4)
-#define LOGT(fmt, ...) \
+#define LOGT(...) \
   do { \
-    if (LOG_LEVEL >= 4) LOG_PRINT_WITH_TAG(LOG_COLOR_GRAY, "T", fmt, ##__VA_ARGS__); \
+    if (LOG_LEVEL >= 4) LOG_PRINT_WITH_TAG(LOG_COLOR_GRAY, "T", __VA_ARGS__); \
   } while (0)
 
 // Conditional verbose logging (runtime switch)
-#define LOGV(verbose, fmt, ...) \
+#define LOGV(verbose, ...) \
   do { \
     if (verbose) { \
-      LOG_PRINT_WITH_TAG(LOG_COLOR_GRAY, "V", fmt, ##__VA_ARGS__); \
+      LOG_PRINT_WITH_TAG(LOG_COLOR_GRAY, "V", __VA_ARGS__); \
     } \
   } while (0)

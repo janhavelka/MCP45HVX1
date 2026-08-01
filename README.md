@@ -1,9 +1,9 @@
 # MCP45HVX1 Driver Library
 
 Framework-neutral, production-oriented MCP45HVX1 high-voltage I2C digital
-potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). This hardening
-branch focuses on industry-readiness software behavior, documentation, tests,
-and evidence gates.
+potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). The repository
+emphasizes deterministic software behavior, explicit hardware evidence gates,
+and maintained documentation.
 
 Current release status: v1.0.0 pre-production software package. Local software
 validation and an ESP32-S2 safe-only HIL run have passed, but this is not a
@@ -525,7 +525,9 @@ Each run writes `hil_logs/mcp45hvx1_<timestamp>/` with `raw_serial.txt`,
 Hardware validation is not claimed unless the HIL runner was actually run and
 the resulting evidence bundle is attached to the release or validation record.
 The HIL runner is repository tooling and is excluded from normal PlatformIO
-package exports; use the full repository when capturing HIL evidence.
+package exports; use the full repository when capturing HIL evidence. The
+ignored `hil_logs/` directory is a local staging area: archive a required bundle
+or commit a curated transcript report before clearing it.
 
 Current bundled safe-only evidence:
 
@@ -572,28 +574,26 @@ idf.py build
 ## Packaging
 
 `library.json` defines the package export policy. Normal PlatformIO packages
-include headers, source, examples, metadata, and current core docs. Large
-reference PDFs, extracted datasheet markdown, tests, tools, CI metadata, and
-local build output are intentionally excluded from normal packages to keep the
-install artifact focused and reproducible. HIL tooling and generated HIL report
-markdown under `docs/reports/` are also repo-only. The full reference corpus
-and release-preparation tooling remain in the repository for audit,
-documentation, validation, and release work.
+include headers, source, examples, metadata, and current core docs. Datasheets,
+tests, tools, CI metadata, local build output, and transcript reports are
+intentionally excluded from normal packages to keep the install artifact
+focused and reproducible. The full reference corpus, curated transcript
+reports, and release tooling remain in the repository for audit and validation.
 
 ## Documentation
 
 - [Docs Index](docs/README.md)
 - [Assumptions](ASSUMPTIONS.md)
-- [Implementation Manual](MCP45HVX1_digital_potentiometer_implementation_manual.md)
+- [Changelog](CHANGELOG.md)
 - <a href="docs/DEVICE_REFERENCE.md">Device Reference</a>
 - <a href="docs/MCP45HVX1_API_CONTRACT.md">API Contract</a>
 - <a href="docs/MCP45HVX1_HARDWARE_VALIDATION.md">Hardware Validation</a>
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
-- <a href="docs/RELEASE_NOTES_v1.0.0.md">v1.0.0 Release Notes</a>
 - <a href="docs/IDF_PORT.md">ESP-IDF Port</a>
-- <a href="docs/HARDENING_SUMMARY.md">Hardening Summary</a>
-- `Doxyfile` indexes public headers, the ESP-IDF port notes, the Arduino CLI,
-  and the native IDF entry point.
+- [Datasheets and application notes](docs/reference-pdfs/)
+- [Curated HIL transcript reports](docs/reports/)
+- `Doxyfile` indexes the public headers, maintained docs, the Arduino CLI, and
+  the native IDF entry point.
 
 ## License
 

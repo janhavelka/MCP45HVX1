@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 #include "MCP45HVX1/MCP45HVX1.h"
+#include "examples/common/CliStyle.h"
 #include "examples/common/Log.h"
 
 namespace health_view {
@@ -28,16 +29,6 @@ inline const char* failureColor(uint32_t failures) {
 
 inline const char* successColor(uint32_t successes) {
   return (successes > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_GRAY;
-}
-
-inline const char* successRateColor(float pct) {
-  if (pct >= 99.9f) {
-    return LOG_COLOR_GREEN;
-  }
-  if (pct >= 80.0f) {
-    return LOG_COLOR_YELLOW;
-  }
-  return LOG_COLOR_RED;
 }
 
 inline const char* stateName(MCP45HVX1::DriverState state) {
@@ -145,7 +136,7 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
              failureColor(totalFailures),
              static_cast<unsigned long>(totalFailures),
              LOG_COLOR_RESET,
-             successRateColor(pct),
+             cli::successRateColor(pct),
              static_cast<double>(pct),
              LOG_COLOR_RESET,
              dev.lastError().ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED,

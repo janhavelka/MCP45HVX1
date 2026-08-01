@@ -1,8 +1,9 @@
 # MCP45HVX1 Documentation
 
-This directory contains maintained documentation for the MCP45HVX1 driver plus
-vendor reference PDFs. Audit reports and prompt-by-prompt implementation notes
-were merged into the current docs or removed from the maintained tree.
+This directory contains maintained documentation, vendor reference PDFs, and
+curated hardware transcript reports for the MCP45HVX1 driver. Completed task
+prompts and one-off hardening summaries are intentionally not retained after
+their durable content has been merged into these documents and the changelog.
 
 Current status: v1.0.0 pre-production software package. Local software
 validation and ESP32-S2 safe-only HIL evidence are available, while
@@ -18,9 +19,12 @@ production release approval remain evidence-gated.
 | [`MCP45HVX1_API_CONTRACT.md`](MCP45HVX1_API_CONTRACT.md) | Public software contract: transport ownership, lifecycle, health, uncertainty, poll jobs, raw access, and General Call policy. |
 | [`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md) | Hardware/HIL evidence procedure for address straps, POR/BOR, analog output, SHDN/WLAT, safe loads, and General Call isolation. |
 | [`MCP45HVX1_RELEASE_CHECKLIST.md`](MCP45HVX1_RELEASE_CHECKLIST.md) | Release gates for repository state, versioning, checks, packaging, CI, hardware evidence, and signoff. |
-| [`RELEASE_NOTES_v1.0.0.md`](RELEASE_NOTES_v1.0.0.md) | GitHub release notes for the v1.0.0 pre-production software package. |
 | [`IDF_PORT.md`](IDF_PORT.md) | ESP-IDF component/example boundary, command parity, local/CI build evidence rules, and native-IDF guard coverage. |
-| [`HARDENING_SUMMARY.md`](HARDENING_SUMMARY.md) | Concise closure summary for the software-hardening work and remaining evidence gaps. |
+
+Repository-wide user and release information lives in
+[`../README.md`](../README.md), [`../CHANGELOG.md`](../CHANGELOG.md),
+[`../ASSUMPTIONS.md`](../ASSUMPTIONS.md), and
+[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Reference PDFs
 
@@ -38,17 +42,27 @@ Key references:
 Raw PDF text extracts are not maintained in this repository. Regenerate them
 from the PDFs when needed for a focused review.
 
+## Curated Transcript Reports
+
+The retained reports contain the run metadata, command results, and full serial
+transcripts needed to audit the two recorded safe-only ESP32-S2 sessions:
+
+- <a href="reports/hil-validation-COM8-20260629.md">8-hour validation run</a>.
+- <a href="reports/hil-panic-repro-COM8-20260629.md">1-hour panic-reproduction run</a>.
+
+These reports and all PDFs are repository evidence and are deliberately kept.
+They are excluded from install packages because of their size. Generated local
+`hil_logs/` bundles are ignored staging artifacts; archive a bundle externally
+or commit a curated report before deleting it when it carries new evidence.
+
 ## Evidence Policy
 
 - Software checks prove driver behavior only within the tested transports and
   fake-bus scenarios.
 - HIL logs are evidence only when produced by an actual hardware run and
-  attached to a release or validation record.
-- Current bundled safe-only HIL reports live under
-  [`docs/reports/`](https://github.com/janhavelka/MCP45HVX1/tree/v1.0.0/docs/reports)
-  in the repository/source archive: the 8-hour COM8 ESP32-S2 run finished
-  `PASS_SAFE_ONLY` with zero failures. These large report files are excluded
-  from the normal PlatformIO package archive.
+  retained in a release, validation record, or curated transcript report.
+- The bundled 8-hour COM8 ESP32-S2 report finished `PASS_SAFE_ONLY` with zero
+  failures. Both retained reports are excluded from install packages.
 - Register readback proves volatile register contents, not analog output
   movement when WLAT, SHDN, or external circuitry overrides the terminals.
 - General Call use needs isolated-bus evidence or explicit risk acceptance for

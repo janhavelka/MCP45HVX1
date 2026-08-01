@@ -14,13 +14,12 @@
 
 #include "MCP45HVX1/MCP45HVX1.h"
 #include "examples/common/BoardConfig.h"
-#include "examples/common/BusDiag.h"
 #include "examples/common/CliShell.h"
 #include "examples/common/CliStyle.h"
-#include "examples/common/HealthDiag.h"
 #include "examples/common/HealthView.h"
+#include "examples/common/I2cScanner.h"
+#include "examples/common/I2cTransport.h"
 #include "examples/common/Log.h"
-#include "examples/common/TransportAdapter.h"
 
 namespace {
 
@@ -149,43 +148,6 @@ bool isPrimaryAddress(uint8_t address) {
 bool isAlternateAddress(uint8_t address) {
   return address >= MCP45HVX1::cmd::ALT_MIN_ADDRESS &&
          address <= MCP45HVX1::cmd::ALT_MAX_ADDRESS;
-}
-
-const char* statusName(MCP45HVX1::Err code) {
-  switch (code) {
-    case MCP45HVX1::Err::OK:
-      return "OK";
-    case MCP45HVX1::Err::IN_PROGRESS:
-      return "IN_PROGRESS";
-    case MCP45HVX1::Err::INVALID_CONFIG:
-      return "INVALID_CONFIG";
-    case MCP45HVX1::Err::NOT_INITIALIZED:
-      return "NOT_INITIALIZED";
-    case MCP45HVX1::Err::INVALID_PARAM:
-      return "INVALID_PARAM";
-    case MCP45HVX1::Err::I2C_ERROR:
-      return "I2C_ERROR";
-    case MCP45HVX1::Err::TIMEOUT:
-      return "TIMEOUT";
-    case MCP45HVX1::Err::I2C_TIMEOUT:
-      return "I2C_TIMEOUT";
-    case MCP45HVX1::Err::I2C_NACK_ADDR:
-      return "I2C_NACK_ADDR";
-    case MCP45HVX1::Err::I2C_NACK_DATA:
-      return "I2C_NACK_DATA";
-    case MCP45HVX1::Err::I2C_BUS:
-      return "I2C_BUS";
-    case MCP45HVX1::Err::DEVICE_NOT_FOUND:
-      return "DEVICE_NOT_FOUND";
-    case MCP45HVX1::Err::REGISTER_MISMATCH:
-      return "REGISTER_MISMATCH";
-    case MCP45HVX1::Err::BUSY:
-      return "BUSY";
-    case MCP45HVX1::Err::UNSUPPORTED:
-      return "UNSUPPORTED";
-    default:
-      return "UNKNOWN";
-  }
 }
 
 const char* statusCause(MCP45HVX1::Err code) {
@@ -502,7 +464,7 @@ MCP45HVX1::Config makeDefaultConfig() {
 void printStatus(const MCP45HVX1::Status& st) {
   LOG_SERIAL.printf("  Status: %s%s%s (code=%u, detail=%ld)\n",
                     statusColor(st),
-                    statusName(st.code),
+                    health_view::errName(st.code),
                     LOG_COLOR_RESET,
                     static_cast<unsigned>(st.code),
                     static_cast<long>(st.detail));
@@ -763,7 +725,7 @@ void printDriverHealth() {
                     static_cast<unsigned long>(s.totalFailures),
                     LOG_COLOR_RESET);
   LOG_SERIAL.printf("  Success rate: %s%.1f%%%s\n",
-                    health_view::successRateColor(successRate),
+                    cli::successRateColor(successRate),
                     static_cast<double>(successRate),
                     LOG_COLOR_RESET);
   if (s.lastOkMs > 0U) {
@@ -782,7 +744,7 @@ void printDriverHealth() {
   }
   LOG_SERIAL.printf("  Last status code/detail: %s%s%s / %ld\n",
                     s.lastError.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED,
-                    statusName(s.lastError.code),
+                    health_view::errName(s.lastError.code),
                     LOG_COLOR_RESET,
                     static_cast<long>(s.lastError.detail));
   if (!s.lastError.ok() && s.lastError.msg != nullptr && s.lastError.msg[0] != '\0') {
@@ -798,7 +760,7 @@ void printDriverHealth() {
                     LOG_COLOR_RESET);
   LOG_SERIAL.printf("  Last uncertainty code/detail: %s%s%s / %ld\n",
                     s.hardwareStateUncertainError.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED,
-                    statusName(s.hardwareStateUncertainError.code),
+                    health_view::errName(s.hardwareStateUncertainError.code),
                     LOG_COLOR_RESET,
                     static_cast<long>(s.hardwareStateUncertainError.detail));
   if (!s.hardwareStateUncertainError.ok() &&
@@ -1487,7 +1449,7 @@ void runSelfTestSafe() {
                       LOG_COLOR_RESET);
     return;
   }
-  reportCheck("probe responds", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("probe responds", st.ok(), st.ok() ? "" : health_view::errName(st.code));
   const bool probeNoTrack = gDev.totalSuccess() == succBefore &&
                             gDev.totalFailures() == failBefore &&
                             gDev.consecutiveFailures() == consBefore;
@@ -1495,12 +1457,12 @@ void runSelfTestSafe() {
 
   uint8_t wiper = 0;
   st = gDev.readWiper(wiper);
-  reportCheck("read wiper", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("read wiper", st.ok(), st.ok() ? "" : health_view::errName(st.code));
   const bool wiperReadOk = st.ok();
 
   uint8_t tcon = 0;
   st = gDev.readTcon(tcon);
-  reportCheck("read TCON", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("read TCON", st.ok(), st.ok() ? "" : health_view::errName(st.code));
   const bool tconReadOk = st.ok();
 
   const uint8_t maxCode = MCP45HVX1::MCP45HVX1::maxWiperCode(gConfig.resolution);
@@ -1519,18 +1481,18 @@ void runSelfTestSafe() {
 
   uint8_t last = 0;
   st = gDev.readLastAddress(last);
-  reportCheck("readLastAddress", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("readLastAddress", st.ok(), st.ok() ? "" : health_view::errName(st.code));
 
   MCP45HVX1::TerminalMode mode = MCP45HVX1::TerminalMode::Potentiometer;
   st = gDev.getTerminalMode(mode);
-  reportCheck("getTerminalMode", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("getTerminalMode", st.ok(), st.ok() ? "" : health_view::errName(st.code));
 
   bool shutdown = false;
   st = gDev.getSoftwareShutdown(shutdown);
-  reportCheck("getSoftwareShutdown", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("getSoftwareShutdown", st.ok(), st.ok() ? "" : health_view::errName(st.code));
 
   st = gDev.recover();
-  reportCheck("recover", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("recover", st.ok(), st.ok() ? "" : health_view::errName(st.code));
   reportCheck("isOnline", gDev.isOnline(), "");
 
   LOG_SERIAL.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
@@ -1577,7 +1539,7 @@ void runOutputSelfTest() {
   MCP45HVX1::RegisterSnapshot baseline;
   MCP45HVX1::Status st = gDev.readSnapshot(baseline);
   if (!st.ok()) {
-    reportCheck("capture baseline", false, statusName(st.code));
+    reportCheck("capture baseline", false, health_view::errName(st.code));
     printStatus(st);
     LOG_SERIAL.printf("Selftest result: pass=%lu fail=%lu skip=%lu\n",
                       static_cast<unsigned long>(result.pass),
@@ -1592,29 +1554,30 @@ void runOutputSelfTest() {
   for (uint8_t i = 0; i < 3U; ++i) {
     st = gDev.writeWiper(testCodes[i]);
     if (!st.ok()) {
-      reportCheck("write test wiper", false, statusName(st.code));
+      reportCheck("write test wiper", false, health_view::errName(st.code));
       break;
     }
     uint8_t readback = 0;
     st = gDev.readWiper(readback);
     reportCheck("verify test wiper", st.ok() && readback == testCodes[i],
-                st.ok() ? "" : statusName(st.code));
+                st.ok() ? "" : health_view::errName(st.code));
     if (!st.ok()) {
       break;
     }
   }
 
   st = gDev.writeTcon(MCP45HVX1::cmd::TCON_DEFAULT);
-  reportCheck("write TCON default", st.ok(), st.ok() ? "" : statusName(st.code));
+  reportCheck("write TCON default", st.ok(), st.ok() ? "" : health_view::errName(st.code));
   if (st.ok()) {
     uint8_t tcon = 0;
     st = gDev.readTcon(tcon);
     reportCheck("verify TCON default", st.ok() && tcon == MCP45HVX1::cmd::TCON_DEFAULT,
-                st.ok() ? "" : statusName(st.code));
+                st.ok() ? "" : health_view::errName(st.code));
   }
 
   const MCP45HVX1::Status restore = restoreSnapshot(baseline);
-  reportCheck("restore baseline", restore.ok(), restore.ok() ? "" : statusName(restore.code));
+  reportCheck("restore baseline", restore.ok(),
+              restore.ok() ? "" : health_view::errName(restore.code));
   if (!restore.ok()) {
     gOutputStateUncertain = true;
     LOG_SERIAL.printf("%s[FAIL]%s Restore failure is high severity; verify analog output before continuing.\n",
@@ -1764,7 +1727,7 @@ void recordStressResult(const MCP45HVX1::Status& st,
                       LOG_COLOR_RESET,
                       static_cast<unsigned long>(durationUs));
     if (!st.ok()) {
-      LOG_SERIAL.printf(" (%s)", statusName(st.code));
+      LOG_SERIAL.printf(" (%s)", health_view::errName(st.code));
     }
     LOG_SERIAL.println();
   }
@@ -1988,7 +1951,7 @@ void handleCommand(String line) {
   } else if (strcmp(command, "version") == 0 || strcmp(command, "ver") == 0) {
     if (requireNoArgs(command, p)) printVersion();
   } else if (strcmp(command, "scan") == 0) {
-    if (requireNoArgs(command, p)) bus_diag::scan();
+    if (requireNoArgs(command, p)) i2c_scanner::scan(Wire);
   } else if (strcmp(command, "color") == 0) {
     handleColor(p);
   } else if (strcmp(command, "begin") == 0) {

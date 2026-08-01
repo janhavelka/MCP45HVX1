@@ -12,13 +12,31 @@
 - Excluded repository-local `.pio` content explicitly from all source filters.
 - Added Arduino-ESP32 and ESP-IDF versions to the Arduino CLI `version` output
   for build and HIL provenance.
+- Consolidated the documentation around the maintained README, device
+  reference, API contract, hardware-validation procedure, release checklist,
+  ESP-IDF notes, datasheets, and curated HIL transcript reports.
+- Reworked example logging macros to remain standard C++17 when a log message
+  has no format arguments.
+
+### Removed
+
+- Removed completed prompt files, one-off hardening/release summaries, and the
+  duplicate implementation manual after merging their durable information into
+  the maintained documentation and changelog.
+- Removed unused `CommandHandler` and `HealthDiag` helpers, the include-only
+  `TransportAdapter` and `BusDiag` wrappers, duplicate status/rate formatters,
+  and an unused second I2C recovery implementation from the examples.
+- Cleared generated build/cache output and duplicate local HIL staging bundles;
+  all nine vendor PDFs and both curated full-transcript reports remain tracked.
 
 ### Validation
 
 - Passed all 74 native tests, the aggregate repository validator, package
   creation, and clean ESP32-S2/ESP32-S3 Arduino builds on pioarduino
-  `55.03.311`. Hardware/HIL and native ESP-IDF builds were not run in this
-  change.
+  `55.03.311`.
+- GitHub Actions passed all six jobs for the pioarduino update, including pure
+  ESP-IDF 6.0.1 builds for ESP32-S2 and ESP32-S3. No new hardware/HIL run was
+  performed.
 
 ## 1.0.0 - 2026-06-30
 
