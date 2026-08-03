@@ -569,8 +569,6 @@ private:
   Status _i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                           uint8_t* rxBuf, size_t rxLen);
   Status _i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len);
-  Status _i2cWriteReadTracked(uint8_t addr, const uint8_t* txBuf, size_t txLen,
-                              uint8_t* rxBuf, size_t rxLen);
   Status _i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len);
   Status _busResetTracked();
 
@@ -578,7 +576,6 @@ private:
   Status _readRegisterRaw(uint8_t reg, uint8_t& value);
   Status _readRegisterTracked(uint8_t reg, uint8_t& value);
   Status _readLastAddressTracked(uint8_t& value);
-  Status _writeRegisterRaw(uint8_t reg, uint8_t value);
   Status _writeRegisterTracked(uint8_t reg, uint8_t value);
   Status _sendWiperStepCommand(cmd::Command command, uint8_t steps);
   Status _generalCallWrite(uint8_t commandByte, const uint8_t* data, size_t len);

@@ -28,8 +28,8 @@ libraries in this workspace.
   by sharing Arduino implementation source.
 - Use `Status` for all fallible public operations.
 - Keep all writes scoped to this repository.
-- Run `pio test -e native` and the scripts under `tools/` after changes when
-  PlatformIO is available.
+- Run `python tools/validate.py` after changes when its required tools are
+  available. On Windows it selects the repository PlatformIO wrapper.
 
 # MCP45HVX1 hardening rules
 

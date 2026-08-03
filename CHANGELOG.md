@@ -17,6 +17,8 @@
   ESP-IDF notes, datasheets, and curated HIL transcript reports.
 - Reworked example logging macros to remain standard C++17 when a log message
   has no format arguments.
+- Added a portable Windows PlatformIO wrapper and aligned the aggregate
+  validator and maintained contributor/release instructions with it.
 
 ### Removed
 
@@ -26,6 +28,7 @@
 - Removed unused `CommandHandler` and `HealthDiag` helpers, the include-only
   `TransportAdapter` and `BusDiag` wrappers, duplicate status/rate formatters,
   and an unused second I2C recovery implementation from the examples.
+- Removed two private transport/register helpers that had no callers.
 - Cleared generated build/cache output and duplicate local HIL staging bundles;
   all nine vendor PDFs and both curated full-transcript reports remain tracked.
 

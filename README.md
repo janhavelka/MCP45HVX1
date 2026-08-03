@@ -552,6 +552,12 @@ the Arduino ESP32 framework; applications that consume this library through
 `lib_deps` do not need to add a separate `Wire` dependency. The native ESP-IDF
 example and its CI build remain independently pinned to ESP-IDF 6.0.1.
 
+On Windows, use `.\scripts\pio.cmd` for individual PlatformIO commands. It
+selects the current user's VS Code-managed PlatformIO Core and fails clearly if
+that installation is unavailable. `python tools/validate.py` selects this
+wrapper automatically. On other platforms, the examples below use `pio` from
+`PATH`.
+
 ```bash
 python tools/validate.py
 python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py

@@ -35,6 +35,10 @@ call it production-ready or industry-grade.
 
 ## Software Validation
 
+On Windows, replace `pio` in individual commands with `.\scripts\pio.cmd`; the
+aggregate `python tools/validate.py` command selects that wrapper automatically.
+Other platforms use `pio` from `PATH`.
+
 | Gate | Command/evidence |
 |---|---|
 | Python tool syntax | `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` |
@@ -44,9 +48,9 @@ call it production-ready or industry-grade.
 | Generated artifact guard | `python tools/check_generated_artifacts.py` |
 | HIL parser/evidence guard | `python tools/test_run_hil_mcp45hvx1_parser.py` |
 | Version check | `python scripts/generate_version.py check` |
-| Native tests | `python -m platformio test -e native` |
-| Arduino ESP32-S3 build | `python -m platformio run -e esp32s3dev` |
-| Arduino ESP32-S2 build | `python -m platformio run -e esp32s2dev` |
+| Native tests | `pio test -e native` |
+| Arduino ESP32-S3 build | `pio run -e esp32s3dev` |
+| Arduino ESP32-S2 build | `pio run -e esp32s2dev` |
 | Pure ESP-IDF esp32s3 build | `idf.py -C examples/espidf_basic set-target esp32s3 build`, or CI log link |
 | Pure ESP-IDF esp32s2 build | `idf.py -C examples/espidf_basic set-target esp32s2 build`, or CI log link |
 | Remote CI run reviewed | `gh run list --limit 10` or equivalent workflow/log URL |
@@ -67,7 +71,7 @@ branch pushes are not remote CI evidence by themselves.
 | Package validation | `pio pkg pack` passed during release prep; generated archive removed |
 | Package artifact and size | `MCP45HVX1-1.0.0.tar.gz`, `95527` bytes when packed locally |
 | ESP-IDF local build | Not run locally; `idf.py` was not found on PATH |
-| Remote CI | To be reviewed from the GitHub Actions run triggered by tag `v1.0.0` |
+| Remote CI | [Tag `v1.0.0` GitHub Actions run](https://github.com/janhavelka/MCP45HVX1/actions/runs/28450131279) passed all jobs |
 | Safe-only HIL report | [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md) |
 | Safe-only HIL verdict | `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency `0.188 s` |
 | Panic repro report | [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md) |
@@ -80,7 +84,7 @@ branch pushes are not remote CI evidence by themselves.
 
 | Gate | Evidence |
 |---|---|
-| Package pack | `python -m platformio pkg pack` passed |
+| Package pack | `pio pkg pack` passed |
 | Generated tarball removed | package archive removed before commit |
 | Generated archive ignore policy | `.gitignore` and guard cover `*.tar.gz`, `*.tgz`, and `*.zip` |
 | Export policy reviewed | `library.json` export section reviewed |

@@ -1010,19 +1010,6 @@ Status MCP45HVX1::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len) {
   return _config.i2cWrite(addr, buf, len, _config.i2cTimeoutMs, _config.i2cUser);
 }
 
-Status MCP45HVX1::_i2cWriteReadTracked(uint8_t addr, const uint8_t* txBuf, size_t txLen,
-                                       uint8_t* rxBuf, size_t rxLen) {
-  if ((txLen > 0 && txBuf == nullptr) || rxBuf == nullptr || rxLen == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid I2C read buffer");
-  }
-
-  Status st = _i2cWriteReadRaw(addr, txBuf, txLen, rxBuf, rxLen);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
-  return _updateHealth(st);
-}
-
 Status MCP45HVX1::_i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C write buffer");
@@ -1146,24 +1133,6 @@ Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
     value = readback;
   }
   return Status::Ok();
-}
-
-Status MCP45HVX1::_writeRegisterRaw(uint8_t reg, uint8_t value) {
-  if (!_isWritableRegister(reg)) {
-    return Status::Error(Err::INVALID_PARAM, "Register address is not writable");
-  }
-  if (reg == cmd::REG_WIPER0 && !_isValidWiperCode(value, _config.resolution)) {
-    return Status::Error(Err::INVALID_PARAM, "Wiper code exceeds configured resolution", value);
-  }
-
-  const uint8_t sanitized = (reg == cmd::REG_TCON0) ? sanitizeTcon(value) : value;
-  const uint8_t payload[2] = {cmd::makeCommand(reg, cmd::Command::WriteData), sanitized};
-  Status st = _i2cWriteRaw(_config.i2cAddress, payload, sizeof(payload));
-  if (st.ok()) {
-    _addressPointerKnown = true;
-    _addressPointer = reg;
-  }
-  return st;
 }
 
 Status MCP45HVX1::_writeRegisterTracked(uint8_t reg, uint8_t value) {

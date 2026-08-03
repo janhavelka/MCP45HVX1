@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +16,16 @@ def run(cmd: list[str], required: bool = True) -> bool:
     if result.returncode != 0 and required:
         raise SystemExit(result.returncode)
     return result.returncode == 0
+
+
+def platformio_command() -> list[str] | None:
+    if os.name == "nt":
+        wrapper = ROOT / "scripts" / "pio.cmd"
+        if not wrapper.is_file():
+            raise SystemExit(f"PlatformIO wrapper not found: {wrapper}")
+        return [str(wrapper)]
+    executable = shutil.which("pio")
+    return [executable] if executable else None
 
 
 def main() -> int:
@@ -48,10 +58,11 @@ def main() -> int:
     else:
         print("SKIP: g++ not found")
 
-    if shutil.which("pio"):
-        run(["pio", "test", "-e", "native"])
-        run(["pio", "run", "-e", "esp32s3dev"])
-        run(["pio", "run", "-e", "esp32s2dev"])
+    pio = platformio_command()
+    if pio:
+        run([*pio, "test", "-e", "native"])
+        run([*pio, "run", "-e", "esp32s3dev"])
+        run([*pio, "run", "-e", "esp32s2dev"])
     else:
         print("SKIP: pio not found")
 
