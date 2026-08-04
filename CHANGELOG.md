@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Added table-driven `help <command>` / `? <command>` lookup with canonical
+  aliases, colored safety classifications, syntax, examples, Arduino/native
+  CLI parity guards, and safe HIL coverage.
 - Upgraded Arduino example builds from pioarduino `platform-espressif32`
   `54.03.20` (Arduino-ESP32 3.2.0 / ESP-IDF 5.4.1) to `55.03.311`
   (Arduino-ESP32 3.3.11 / ESP-IDF 5.5.5).

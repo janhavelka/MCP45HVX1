@@ -705,27 +705,266 @@ void beginDriver() {
   }
 }
 
+enum class HelpSection : uint8_t {
+  Common,
+  DeviceSelection,
+  Diagnostics,
+  Tests,
+  OutputControl,
+  Dangerous,
+};
+
+enum class HelpSafety : uint8_t {
+  Safe,
+  Lifecycle,
+  QueryOrWrite,
+  OutputChanging,
+  Dangerous,
+};
+
+struct CommandHelpSpec {
+  const char* canonical;
+  const char* aliases;
+  const char* synopsis;
+  const char* description;
+  HelpSection section;
+  HelpSafety safety;
+  const char* syntax;
+  const char* examples;
+};
+
+static constexpr CommandHelpSpec COMMAND_HELP[] = {
+    {"help", "?", "help / ? [command]", "Show all commands or detailed help for one command.",
+     HelpSection::Common, HelpSafety::Safe, "help\nhelp <command>\n? <command>",
+     "help\nhelp wiper\n? gc"},
+    {"version", "ver", "version / ver", "Show firmware and library provenance.",
+     HelpSection::Common, HelpSafety::Safe, "version\nver", "version"},
+    {"scan", "", "scan", "Scan the application-owned I2C bus for responding addresses.",
+     HelpSection::Common, HelpSafety::Safe, "scan", "scan"},
+    {"color", "", "color [on|off]", "Show or change ANSI color output.",
+     HelpSection::Common, HelpSafety::Safe, "color\ncolor <on|off>", "color off\ncolor on"},
+    {"verbose", "", "verbose [on|off]", "Show or change per-operation diagnostic logging.",
+     HelpSection::Common, HelpSafety::Safe, "verbose\nverbose <on|off>", "verbose on\nstress 10"},
+
+    {"begin", "", "begin [addr] [7|8]", "Apply the selected address/variant and initialize the driver.",
+     HelpSection::DeviceSelection, HelpSafety::Lifecycle,
+     "begin\nbegin <addr> [7|8]\nbegin <7|8>", "begin\nbegin 0x3c 8"},
+    {"addr", "", "addr [0x3c..0x3f]", "Show or select a documented I2C address, then reinitialize.",
+     HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr\naddr <0x3c..0x3f>",
+     "addr\naddr 0x3c"},
+    {"addr_alt", "", "addr_alt <0x5c..0x5f>", "Opt in to the disputed alternate address range.",
+     HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr_alt <0x5c..0x5f>",
+     "addr_alt 0x5c"},
+    {"variant", "res", "variant / res [hv31|hv51|7|8]", "Show or select the configured device resolution.",
+     HelpSection::DeviceSelection, HelpSafety::Lifecycle,
+     "variant\nvariant <hv31|hv51>\nres <7|8>", "variant hv51\nres 7"},
+    {"rab", "", "rab [5k|10k|50k|100k]", "Show or select nominal RAB for resistance helpers.",
+     HelpSection::DeviceSelection, HelpSafety::Lifecycle,
+     "rab\nrab <5k|10k|50k|100k|502|103|503|104>", "rab 10k\nrab 103"},
+
+    {"probe", "", "probe", "Check the configured device without changing health counters.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "probe", "probe"},
+    {"cfg", "settings detail", "cfg / settings / detail", "Show configuration and cache state; detail also prints health.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "cfg\nsettings\ndetail", "detail"},
+    {"drv", "health", "drv / health", "Show driver state, counters, last error, and hardware uncertainty.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "drv\nhealth", "drv"},
+    {"state", "", "state", "Show compact machine-parseable state output.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "state", "state"},
+    {"read", "rregs", "read / rregs", "Read and decode Wiper and TCON as one snapshot.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "read\nrregs", "read"},
+    {"readwiper", "", "readwiper", "Read the volatile Wiper 0 code.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "readwiper", "readwiper"},
+    {"readtcon", "", "readtcon", "Read and decode the volatile TCON0 register.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "readtcon", "readtcon"},
+    {"last", "", "last", "Read using the device's current address pointer.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "last", "reg 0x04\nlast"},
+    {"reg", "rreg", "reg / rreg <0x00|0x04>", "Read one implemented volatile register.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "reg <0x00|0x04>\nrreg <0x00|0x04>",
+     "reg 0x00\nrreg 0x04"},
+    {"dump", "", "dump", "Read the decoded snapshot and current address pointer.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "dump", "dump"},
+    {"info", "", "info", "Show variant, tap count, nominal resistance, step, and current helpers.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "info", "info"},
+    {"errata", "", "errata", "Show DS80000649B risks and required board-level gates.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "errata", "errata"},
+    {"recover", "", "recover", "Refresh Wiper/TCON caches and tracked health using readback.",
+     HelpSection::Diagnostics, HelpSafety::Safe, "recover", "recover\nstate"},
+    {"iface_reset", "", "iface_reset", "Run the board-owned I2C reset callback; this does not reset Wiper/TCON.",
+     HelpSection::Diagnostics, HelpSafety::Lifecycle, "iface_reset", "iface_reset\nrecover"},
+
+    {"selftest", "", "selftest [safe|output]", "Run the safe diagnostic suite or an explicit restoring output test.",
+     HelpSection::Tests, HelpSafety::QueryOrWrite, "selftest\nselftest safe\nselftest output",
+     "selftest safe\nselftest output"},
+    {"stress", "", "stress [n]", "Run bounded read-only probe/Wiper/TCON cycles.",
+     HelpSection::Tests, HelpSafety::Safe, "stress [1..255]", "stress 100"},
+
+    {"wiper", "", "wiper [code|percent|fraction]", "Read or set the volatile Wiper 0 position.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite,
+     "wiper\nwiper <0..max>\nwiper percent <0..100>\nwiper fraction <0.0..1.0>",
+     "wiper\nwiper 0x7f\nwiper percent 50"},
+    {"frac", "pos", "frac / pos [0.0..1.0]", "Read or set normalized Wiper position.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite, "frac\nfrac <0.0..1.0>\npos <0.0..1.0>",
+     "frac\nfrac 0.5"},
+    {"zero", "mid max", "zero / mid / max", "Move the Wiper to a common code preset.",
+     HelpSection::OutputControl, HelpSafety::OutputChanging, "zero\nmid\nmax", "mid"},
+    {"inc", "dec", "inc / dec [n]", "Step Wiper 0 with endpoint clamping.",
+     HelpSection::OutputControl, HelpSafety::OutputChanging, "inc [1..255]\ndec [1..255]",
+     "inc\ndec 4"},
+    {"tcon", "", "tcon [value|default]", "Read or write the volatile TCON0 register.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite, "tcon\ntcon <0x00..0xff>\ntcon default",
+     "tcon\ntcon 0xff"},
+    {"term", "terminal", "term / terminal a|w|b [on|off]", "Read or change one terminal connection bit.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite,
+     "term <a|w|b>\nterm <a|w|b> <on|off>\nterminal <a|w|b> <on|off>",
+     "term a\nterminal a off"},
+    {"shutdown", "software-shutdown", "shutdown / software-shutdown [on|off]", "Read or set TCON software shutdown; not the SHDN pin.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite,
+     "shutdown\nshutdown <on|off>\nsoftware-shutdown <on|off>", "shutdown\nshutdown on"},
+    {"mode", "", "mode [pot|bw|aw|float|shutdown]", "Read or apply a named terminal connection preset.",
+     HelpSection::OutputControl, HelpSafety::QueryOrWrite,
+     "mode\nmode <pot|bw|aw|float|shutdown>", "mode\nmode bw"},
+    {"defaults", "", "defaults", "Restore documented volatile Wiper/TCON POR/BOR defaults.",
+     HelpSection::OutputControl, HelpSafety::OutputChanging, "defaults", "defaults"},
+
+    {"stress_mix", "", "stress_mix [n]", "Run bounded Wiper/mode writes and restore the captured baseline.",
+     HelpSection::Dangerous, HelpSafety::OutputChanging, "stress_mix [1..255]", "stress_mix 10"},
+    {"raw", "", "raw [write <reg> <value>]", "Read the raw snapshot or write one implemented volatile register.",
+     HelpSection::Dangerous, HelpSafety::Dangerous,
+     "raw\nraw write <0x00|0x04> <0x00..0xff>", "raw\nraw write 0x04 0xff"},
+    {"wreg", "wregs", "wreg / wregs <reg> <value>", "Raw volatile register-write aliases.",
+     HelpSection::Dangerous, HelpSafety::Dangerous,
+     "wreg <0x00|0x04> <0x00..0xff>\nwregs <0x00|0x04> <0x00..0xff>",
+     "wreg 0x04 0xff"},
+    {"gc", "", "gc arm|disarm|wiper|tcon|inc|dec", "Issue one armed General Call broadcast operation.",
+     HelpSection::Dangerous, HelpSafety::Dangerous,
+     "gc arm\ngc disarm\ngc wiper <code>\ngc tcon <value>\ngc inc\ngc dec",
+     "errata\ngc arm\ngc inc"},
+};
+
+const char* helpSectionName(HelpSection section) {
+  switch (section) {
+    case HelpSection::Common: return "Common";
+    case HelpSection::DeviceSelection: return "Device Selection";
+    case HelpSection::Diagnostics: return "Diagnostics";
+    case HelpSection::Tests: return "Tests";
+    case HelpSection::OutputControl: return "Output Control";
+    case HelpSection::Dangerous: return "Dangerous / Operator-Gated";
+  }
+  return "Commands";
+}
+
+const char* helpSafetyName(HelpSafety safety) {
+  switch (safety) {
+    case HelpSafety::Safe: return "SAFE / READ-ONLY";
+    case HelpSafety::Lifecycle: return "LIFECYCLE / BUS CONTROL";
+    case HelpSafety::QueryOrWrite: return "READ-ONLY QUERY; OUTPUT-CHANGING WHEN SET";
+    case HelpSafety::OutputChanging: return "OUTPUT-CHANGING";
+    case HelpSafety::Dangerous: return "DANGEROUS / RAW OR BUS-WIDE";
+  }
+  return "UNKNOWN";
+}
+
+const char* helpSafetyColor(HelpSafety safety) {
+  switch (safety) {
+    case HelpSafety::Safe: return cGreen();
+    case HelpSafety::Lifecycle: return cCyan();
+    case HelpSafety::QueryOrWrite:
+    case HelpSafety::OutputChanging: return cYellow();
+    case HelpSafety::Dangerous: return cMagenta();
+  }
+  return cReset();
+}
+
+bool helpNameMatches(const char* names, const char* command) {
+  if (names == nullptr || command == nullptr || command[0] == '\0') {
+    return false;
+  }
+  const size_t commandLen = strlen(command);
+  const char* cursor = names;
+  while (*cursor != '\0') {
+    while (*cursor == ' ') ++cursor;
+    const char* start = cursor;
+    while (*cursor != '\0' && *cursor != ' ') ++cursor;
+    if (static_cast<size_t>(cursor - start) == commandLen &&
+        strncmp(start, command, commandLen) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const CommandHelpSpec* findCommandHelp(const char* command) {
+  for (const CommandHelpSpec& spec : COMMAND_HELP) {
+    if (strcmp(spec.canonical, command) == 0 || helpNameMatches(spec.aliases, command)) {
+      return &spec;
+    }
+  }
+  return nullptr;
+}
+
+void printHelpLines(const char* lines) {
+  const char* cursor = lines;
+  while (cursor != nullptr && *cursor != '\0') {
+    const char* end = strchr(cursor, '\n');
+    const size_t length = end == nullptr ? strlen(cursor) : static_cast<size_t>(end - cursor);
+    printf("    %.*s\n", static_cast<int>(length), cursor);
+    cursor = end == nullptr ? nullptr : end + 1;
+  }
+}
+
+void printCommandHelp(const CommandHelpSpec& spec) {
+  printf("%s=== Help: %s ===%s\n", cCyan(), spec.canonical, cReset());
+  printf("  Section: %s\n", helpSectionName(spec.section));
+  printf("  Aliases: %s\n", spec.aliases[0] == '\0' ? "none" : spec.aliases);
+  printf("  Safety: %s%s%s\n", helpSafetyColor(spec.safety),
+         helpSafetyName(spec.safety), cReset());
+  printf("  Purpose: %s\n", spec.description);
+  puts("  Syntax:");
+  printHelpLines(spec.syntax);
+  puts("  Examples:");
+  printHelpLines(spec.examples);
+}
+
 void printHelp() {
   printHeader("Native ESP-IDF MCP45HVX1 CLI");
-  puts("Common:");
-  puts("  help | ? | version | ver | color [on|off] | verbose [0|1]");
-  puts("Device selection:");
-  puts("  scan | begin [addr] [7|8] | addr <0x3c..0x3f> | addr_alt <0x5c..0x5f>");
-  puts("  variant [hv31|hv51] | res <7|8> | rab <5k|10k|50k|100k|502|103|503|104>");
-  puts("Read-only diagnostics:");
-  puts("  probe | recover | iface_reset | read | rregs | readwiper | readtcon");
-  puts("  dump | raw | last | reg <reg> | rreg <reg>");
-  puts("  cfg | settings | detail | drv | health | state | info | errata");
-  puts("Output-changing commands:");
-  puts("  defaults | wiper [0..max] | wiper percent <0..100> | wiper fraction <0.0..1.0>");
-  puts("  frac [0.0..1.0] | pos [0.0..1.0] | zero | mid | max | inc [n] | dec [n]");
-  puts("  tcon [value|default] | term a|w|b [on|off] | terminal a|w|b [on|off]");
-  puts("  shutdown [on|off] | software-shutdown [on|off] (TCON, not SHDN pin)");
-  puts("  mode [pot|bw|aw|float|shutdown]");
-  puts("Dangerous / operator-gated:");
-  puts("  raw write <reg> <value> | wreg <reg> <value> | wregs <reg> <value>");
-  puts("  gc arm | gc disarm | gc wiper <code> | gc tcon <value> | gc inc | gc dec");
-  puts("  selftest | selftest safe | selftest output | stress [n] | stress_mix [n]");
+  const HelpSection sections[] = {
+      HelpSection::Common,
+      HelpSection::DeviceSelection,
+      HelpSection::Diagnostics,
+      HelpSection::Tests,
+      HelpSection::OutputControl,
+      HelpSection::Dangerous,
+  };
+  for (HelpSection section : sections) {
+    printf("\n%s[%s]%s\n", cGreen(), helpSectionName(section), cReset());
+    for (const CommandHelpSpec& spec : COMMAND_HELP) {
+      if (spec.section == section) {
+        printf("  %s%-42s%s - %s\n", cCyan(), spec.synopsis, cReset(), spec.description);
+      }
+    }
+  }
+  puts("\nUse `help <command>` for syntax, safety, aliases, and examples.\n");
+}
+
+void handleHelp(const char* args) {
+  if (isBlankArg(args)) {
+    printHelp();
+    return;
+  }
+  char local[LINE_LEN];
+  snprintf(local, sizeof(local), "%s", args);
+  char* command = trim(local);
+  char* extra = splitWhitespace(command);
+  if (extra != nullptr && !isBlankArg(extra)) {
+    puts("Usage: help [command]");
+    return;
+  }
+  const CommandHelpSpec* spec = findCommandHelp(command);
+  if (spec == nullptr) {
+    printf("No help for '%s'; run `help` to list commands.\n", command);
+    return;
+  }
+  printCommandHelp(*spec);
 }
 
 void scanBus() {
@@ -1316,7 +1555,7 @@ void handleCommand(char* line) {
   }
 
   if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
-    printHelp();
+    handleHelp(args);
   } else if (strcmp(cmd, "version") == 0 || strcmp(cmd, "ver") == 0) {
     printf("MCP45HVX1 %s %s\n", MCP45HVX1::VERSION, MCP45HVX1::VERSION_FULL);
   } else if (strcmp(cmd, "scan") == 0) {

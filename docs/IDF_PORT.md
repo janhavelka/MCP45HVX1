@@ -27,6 +27,8 @@ native-IDF boundary and command coverage.
 The native ESP-IDF CLI mirrors the Arduino diagnostic CLI behavior:
 
 - command input is normalized to lowercase and split on whitespace
+- `help <command>` and `? <command>` show aliases, safety, syntax, and examples
+  without executing the selected command
 - byte-sized and output-changing arguments use bounded parsers
 - `color on|off` controls ANSI status/warning output
 - `selftest safe` remains read-only

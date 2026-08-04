@@ -155,6 +155,15 @@ COMMAND_DOCS = [
     "docs/MCP45HVX1_RELEASE_CHECKLIST.md",
 ]
 
+COMMAND_HELP_SPEC_RE = re.compile(
+    r'\{\s*"(?P<canonical>[^"]+)",\s*"(?P<aliases>[^"]*)",\s*'
+    r'"(?P<synopsis>[^"]+)",\s*"(?P<description>[^"]+)",\s*'
+    r'HelpSection::(?P<section>[A-Za-z]+),\s*'
+    r'HelpSafety::(?P<safety>[A-Za-z]+),\s*'
+    r'"(?P<syntax>[^"]+)",\s*"(?P<examples>[^"]+)"\s*\}',
+    re.DOTALL,
+)
+
 
 def fail(msg: str) -> None:
     print(f"CLI contract FAILED: {msg}")
@@ -187,6 +196,32 @@ def help_commands_from_specs(specs: list[str]) -> set[str]:
     return commands
 
 
+def parse_command_help_specs(text: str, label: str) -> list[dict[str, str]]:
+    match = re.search(
+        r"\bCOMMAND_HELP\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\s*\};",
+        text,
+        re.DOTALL,
+    )
+    if match is None:
+        fail(f"{label} missing static COMMAND_HELP table")
+    specs = [item.groupdict() for item in COMMAND_HELP_SPEC_RE.finditer(match.group("body"))]
+    if not specs:
+        fail(f"{label} COMMAND_HELP table is empty or unparsable")
+    return specs
+
+
+def command_help_names(specs: list[dict[str, str]]) -> set[str]:
+    names: set[str] = set()
+    for spec in specs:
+        for name in (spec["canonical"], *spec["aliases"].split()):
+            if not name:
+                continue
+            if name in names:
+                fail(f"duplicate detailed-help command/alias '{name}'")
+            names.add(name)
+    return names
+
+
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
@@ -209,24 +244,62 @@ def main() -> int:
 
     text = bringup_main.read_text(encoding="utf-8", errors="replace")
 
+    help_specs = parse_command_help_specs(text, "Arduino CLI")
+    detailed_help_names = command_help_names(help_specs)
+
     for cmd in MANDATORY_COMMANDS:
         dispatch_re = re.compile(
             rf'strcmp\s*\(\s*command\s*,\s*"{re.escape(cmd)}"\s*\)\s*==\s*0'
         )
         if dispatch_re.search(text) is None:
             fail(f"mandatory command '{cmd}' missing from handleCommand() dispatch")
-        if cmd != "?":
-            help_re = re.compile(rf'printHelpItem\s*\(\s*"[^"]*\b{re.escape(cmd)}\b')
-            if help_re.search(text) is None:
-                fail(f"mandatory command '{cmd}' missing from help text")
+        if cmd not in detailed_help_names:
+            fail(f"mandatory command '{cmd}' missing from COMMAND_HELP lookup table")
 
-    advertised_specs = re.findall(r'printHelpItem\s*\(\s*"([^"]+)"', text)
+    advertised_specs = [spec["synopsis"] for spec in help_specs]
     dispatch_commands = set(
         re.findall(r'strcmp\s*\(\s*command\s*,\s*"([^"]+)"\s*\)\s*==\s*0', text)
     )
+    if detailed_help_names != dispatch_commands:
+        fail(
+            "Arduino detailed-help/dispatch command mismatch: "
+            f"help_only={sorted(detailed_help_names - dispatch_commands)}, "
+            f"dispatch_only={sorted(dispatch_commands - detailed_help_names)}"
+        )
     for cmd in help_commands_from_specs(advertised_specs):
         if cmd not in dispatch_commands:
             fail(f"help advertises command '{cmd}' without handleCommand() dispatch")
+
+    for spec in help_specs:
+        for field in ("synopsis", "description", "section", "safety", "syntax", "examples"):
+            if not spec[field].strip():
+                fail(f"detailed help for '{spec['canonical']}' has empty {field}")
+
+    for token in (
+        "handleHelp(p)",
+        "findCommandHelp",
+        "helpNameMatches",
+        "printCommandHelp",
+        "printHelpItem(spec.synopsis, spec.description)",
+        "Use `help <command>` for syntax, safety, aliases, and examples.",
+        "Safety:",
+        "Syntax:",
+        "Examples:",
+        "No help for",
+    ):
+        require_token(text, token, "Arduino detailed help")
+
+    hil_runner_text = (ROOT / "tools" / "run_hil_mcp45hvx1.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    for command in ("help wiper", "? health", "help gc"):
+        require_token(hil_runner_text, f'"{command}"', "HIL detailed-help coverage")
+    for token in ("Help: wiper", "Aliases: health", "DANGEROUS / RAW OR BUS-WIDE"):
+        require_token(hil_runner_text, token, "HIL detailed-help assertions")
+
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8", errors="replace")
+    for token in ("`help <command>`", "safety classification", "Help lookup never performs"):
+        require_token(readme_text, token, "README detailed-help documentation")
 
     for cmd, token in COMMAND_ACTIONS.items():
         if token not in text:

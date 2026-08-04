@@ -34,6 +34,9 @@ SAFE_COMMAND_PLAN = [
     "version",
     "color off",
     "help",
+    "help wiper",
+    "? health",
+    "help gc",
     "scan",
     "addr",
     "probe",
@@ -420,6 +423,13 @@ class HilRun:
         self.run_command(cli, "color off", "safe", feature_area="CLI")
         self.run_command(cli, "help", "safe", timeout=max(self.args.timeout, 4.0),
                          feature_area="CLI", expected_tokens=("scan", "probe", "stress"))
+        self.run_command(cli, "help wiper", "safe", feature_area="CLI detailed help",
+                         expected_tokens=("Help: wiper", "Safety:", "Syntax:", "Examples:",
+                                          "wiper percent <0..100>"))
+        self.run_command(cli, "? health", "safe", feature_area="CLI detailed-help alias",
+                         expected_tokens=("Help: drv", "Aliases: health", "SAFE / READ-ONLY"))
+        self.run_command(cli, "help gc", "safe", feature_area="CLI detailed-help safety",
+                         expected_tokens=("Help: gc", "DANGEROUS / RAW OR BUS-WIDE", "gc arm"))
         self.run_command(cli, "scan", "safe", timeout=max(self.args.timeout, 8.0),
                          feature_area="I2C discovery")
         self.run_command(cli, "addr", "safe", feature_area="Configuration")

@@ -89,6 +89,15 @@ class FakeCli:
             return "MCP45HVX1 CLI version test\n> "
         if command == "help":
             return "scan\nprobe\nstress\n> "
+        if command == "help wiper":
+            return (
+                "=== Help: wiper ===\nSafety: READ-ONLY QUERY; OUTPUT-CHANGING WHEN SET\n"
+                "Syntax:\nwiper percent <0..100>\nExamples:\nwiper 0x7f\n> "
+            )
+        if command == "? health":
+            return "=== Help: drv ===\nAliases: health\nSafety: SAFE / READ-ONLY\n> "
+        if command == "help gc":
+            return "=== Help: gc ===\nSafety: DANGEROUS / RAW OR BUS-WIDE\ngc arm\n> "
         if command in {"cfg", "settings"}:
             return f"{command}: OK\naddr=0x3C resolution=8\n> "
         if command in {"info", "errata", "read", "reg 0x00", "reg 0x04", "last", "recover"}:
@@ -173,7 +182,10 @@ class HilParserTests(unittest.TestCase):
 
             run.safe_sequence(cli)
 
-        for command in ("version", "scan", "probe", "settings", "health"):
+        for command in (
+            "version", "help wiper", "? health", "help gc", "scan", "probe",
+            "settings", "health",
+        ):
             self.assertIn(command, cli.commands)
         self.assertFalse(any(result.failed for result in run.commands))
 

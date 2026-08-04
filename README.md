@@ -418,6 +418,13 @@ indented rows:
   Terminals: A=yes W=yes B=yes
 ```
 
+Run `help` for the complete colored, sectioned command list. Run
+`help <command>` (or `? <command>`) for a focused entry with the canonical
+command, aliases, safety classification, accepted syntax, and executable
+examples. Alias lookup resolves to the canonical command, so `help health`,
+`help rreg`, and `? terminal` show the corresponding `drv`, `reg`, and `term`
+entries. Help lookup never performs the selected operation.
+
 Use `state` for the parseable one-line state summary, including
 `uncertain=yes/no`; `drv` or `health` for detailed driver health and the last
 uncertainty error; and `detail`, `cfg`, or `settings` for configuration and
@@ -458,6 +465,8 @@ To capture diagnostics for a failure, run `scan`, `probe`, `read`, `state`,
 Typical commands:
 
 ```text
+help wiper
+? health
 scan
 color off
 cfg
@@ -497,7 +506,8 @@ General Call command.
 
 `tools/run_hil_mcp45hvx1.py` captures attachable hardware-in-loop evidence from
 the Arduino or ESP-IDF CLI over serial. The default sequence is safe/read-only:
-`version`, `color off`, `help`, `scan`, `addr`, optional address selection,
+`version`, `color off`, `help`, representative detailed-help and alias lookups,
+`scan`, `addr`, optional address selection,
 `probe`, `cfg`, `settings`, `state`, `drv`, `health`, `readwiper`,
 `readtcon`, `dump`, `selftest safe`, `stress 100`, final `state`, and final
 `drv`.

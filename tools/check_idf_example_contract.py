@@ -149,9 +149,14 @@ def main() -> int:
     ns = runpy.run_path(str(ROOT / "tools" / "check_cli_contract.py"))
     commands = ns.get("MANDATORY_COMMANDS", [])
     components = ns.get("IDF_REQUIRED_COMPONENTS", [])
+    parse_help_specs = ns["parse_command_help_specs"]
+    help_names = ns["command_help_names"]
     main_path = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     text = main_path.read_text(encoding="utf-8", errors="replace")
+    arduino_text = (
+        ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
+    ).read_text(encoding="utf-8", errors="replace")
     cmake = cmake_path.read_text(encoding="utf-8", errors="replace")
     ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8",
@@ -190,18 +195,43 @@ def main() -> int:
     dispatch = set(
         re.findall(r'strcmp\s*\(\s*cmd\s*,\s*"([^"]+)"\s*\)\s*==\s*0', text)
     )
+    arduino_help = parse_help_specs(arduino_text, "Arduino CLI")
+    idf_help = parse_help_specs(text, "ESP-IDF CLI")
+    idf_help_names = help_names(idf_help)
     for cmd in commands:
         if cmd == "?":
             if "?" not in dispatch:
                 fail("mandatory command '?' missing from IDF example")
         elif cmd not in dispatch:
             fail(f"mandatory command '{cmd}' missing from ESP-IDF dispatch")
+        if cmd not in idf_help_names:
+            fail(f"mandatory command '{cmd}' missing from ESP-IDF detailed help")
+    if idf_help_names != dispatch:
+        fail(
+            "ESP-IDF detailed-help/dispatch command mismatch: "
+            f"help_only={sorted(idf_help_names - dispatch)}, "
+            f"dispatch_only={sorted(dispatch - idf_help_names)}"
+        )
+    parity_fields = ("canonical", "aliases", "synopsis", "section", "safety", "syntax", "examples")
+    arduino_rows = [tuple(spec[field] for field in parity_fields) for spec in arduino_help]
+    idf_rows = [tuple(spec[field] for field in parity_fields) for spec in idf_help]
+    if idf_rows != arduino_rows:
+        fail("Arduino and ESP-IDF detailed-help tables differ in names, grammar, safety, or examples")
     for cmd, token in IDF_COMMAND_ACTIONS.items():
         if cmd in dispatch:
             require_token(text, token, f"ESP-IDF command '{cmd}' action")
-    for cmd in help_commands_from_idf_print_help(text):
-        if cmd not in dispatch:
-            fail(f"ESP-IDF help advertises command '{cmd}' without dispatch")
+    for token in (
+        "handleHelp(args)",
+        "findCommandHelp",
+        "helpNameMatches",
+        "printCommandHelp",
+        "Use `help <command>` for syntax, safety, aliases, and examples.",
+        "Safety:",
+        "Syntax:",
+        "Examples:",
+        "No help for",
+    ):
+        require_token(text, token, "ESP-IDF detailed help")
     for component in components:
         if re.search(rf"\b{re.escape(component)}\b", cmake) is None:
             fail(f"ESP-IDF CMake file missing component '{component}'")
