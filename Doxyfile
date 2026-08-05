@@ -31,7 +31,7 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md ASSUMPTIONS.md include docs/README.md docs/DEVICE_REFERENCE.md docs/MCP45HVX1_API_CONTRACT.md docs/MCP45HVX1_HARDWARE_VALIDATION.md docs/MCP45HVX1_RELEASE_CHECKLIST.md docs/IDF_PORT.md examples/common examples/01_basic_bringup_cli examples/espidf_basic
+INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md ASSUMPTIONS.md include docs/DEVICE_REFERENCE.md docs/MCP45HVX1_API_CONTRACT.md docs/MCP45HVX1_HARDWARE_VALIDATION.md docs/MCP45HVX1_RELEASE_CHECKLIST.md docs/IDF_PORT.md examples/common examples/01_basic_bringup_cli examples/espidf_basic
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*

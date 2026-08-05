@@ -605,7 +605,7 @@ release tooling remain in the repository for audit and validation.
 
 ## Documentation
 
-- [Docs Index](docs/README.md)
+- <a href="docs/README.md">Docs Index</a>
 - [Assumptions](ASSUMPTIONS.md)
 - [Changelog](CHANGELOG.md)
 - <a href="docs/DEVICE_REFERENCE.md">Device Reference</a>
