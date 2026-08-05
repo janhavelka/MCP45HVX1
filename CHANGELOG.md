@@ -21,6 +21,8 @@ No changes yet.
   `54.03.20` (Arduino-ESP32 3.2.0 / ESP-IDF 5.4.1) to `55.03.311`
   (Arduino-ESP32 3.3.11 / ESP-IDF 5.5.5).
 - Pinned PlatformIO Core 6.1.19 in CI and centralized its cache key version.
+- Updated official checkout, cache, and Python setup actions to their Node 24
+  majors so GitHub-hosted CI does not depend on the deprecated Node 20 runtime.
 - Removed the forced PSRAM macro and original-ESP32 PSRAM cache workaround from
   the declared no-PSRAM ESP32-S3 target.
 - Excluded repository-local `.pio` content explicitly from all source filters.
