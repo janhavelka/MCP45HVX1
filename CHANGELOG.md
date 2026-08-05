@@ -2,14 +2,25 @@
 
 ## Unreleased
 
-### Changed
+No changes yet.
+
+## 1.1.0 - 2026-08-05
+
+### Added
 
 - Added table-driven `help <command>` / `? <command>` lookup with canonical
   aliases, colored safety classifications, syntax, examples, Arduino/native
   CLI parity guards, and safe HIL coverage.
+- Added a targeted ESP32-S2 COM9 `PASS_SAFE_ONLY` report with 31 executed
+  checks, zero failures, and final READY MCP45HV51 state at `0x3C`.
+- Added Doxygen validation with warnings treated as errors to GitHub Actions.
+
+### Changed
+
 - Upgraded Arduino example builds from pioarduino `platform-espressif32`
   `54.03.20` (Arduino-ESP32 3.2.0 / ESP-IDF 5.4.1) to `55.03.311`
   (Arduino-ESP32 3.3.11 / ESP-IDF 5.5.5).
+- Pinned PlatformIO Core 6.1.19 in CI and centralized its cache key version.
 - Removed the forced PSRAM macro and original-ESP32 PSRAM cache workaround from
   the declared no-PSRAM ESP32-S3 target.
 - Excluded repository-local `.pio` content explicitly from all source filters.
@@ -17,7 +28,12 @@
   for build and HIL provenance.
 - Consolidated the documentation around the maintained README, device
   reference, API contract, hardware-validation procedure, release checklist,
-  ESP-IDF notes, datasheets, and curated HIL transcript reports.
+  ESP-IDF notes, datasheets, and compact HIL evidence summaries.
+- Made repository HIL report copies explicit through `--report-file`, omitted
+  repetitive benchmark/soak rows from human reports, and renamed the hard-coded
+  `8-hour soak` feature label to the duration-neutral `Safe-only soak`.
+- Made the README quick start read-only after initialization and documented the
+  legacy `tick()` hook as unnecessary for new code.
 - Reworked example logging macros to remain standard C++17 when a log message
   has no format arguments.
 - Added a portable Windows PlatformIO wrapper and aligned the aggregate
@@ -32,17 +48,25 @@
   `TransportAdapter` and `BusDiag` wrappers, duplicate status/rate formatters,
   and an unused second I2C recovery implementation from the examples.
 - Removed two private transport/register helpers that had no callers.
-- Cleared generated build/cache output and duplicate local HIL staging bundles;
-  all nine vendor PDFs and both curated full-transcript reports remain tracked.
+- Cleared generated build/cache output, duplicate local HIL staging bundles,
+  and roughly 21 MB of repetitive command-by-command Markdown rows while
+  preserving compact HIL provenance and result summaries.
 
 ### Validation
 
 - Passed all 74 native tests, the aggregate repository validator, package
   creation, and clean ESP32-S2/ESP32-S3 Arduino builds on pioarduino
   `55.03.311`.
-- GitHub Actions passed all six jobs for the pioarduino update, including pure
-  ESP-IDF 6.0.1 builds for ESP32-S2 and ESP32-S3. No new hardware/HIL run was
-  performed.
+- Passed warning-free Doxygen generation and the HIL parser/self-tests.
+- The targeted COM9 run completed `PASS_SAFE_ONLY`; output-changing and
+  physical hardware gates remained disabled.
+
+### Known Limits
+
+- This remains a pre-production software package. It does not claim analog
+  accuracy, high-voltage safety, production readiness, or General Call safety.
+- Output-changing, SHDN/WLAT, address-matrix, rail-cycle, physical fault,
+  analog, and high-voltage evidence gates remain open.
 
 ## 1.0.0 - 2026-06-30
 

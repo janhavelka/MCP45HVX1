@@ -39,7 +39,7 @@ correct command automatically.
 ### Pull Requests
 - Keep PRs focused (one feature/fix per PR)
 - Update documentation if needed
-- Add changelog entry under `[Unreleased]`
+- Add a changelog entry under `Unreleased`
 - Run the relevant local checks from `docs/MCP45HVX1_RELEASE_CHECKLIST.md` and
   ensure CI passes
 

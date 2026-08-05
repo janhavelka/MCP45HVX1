@@ -58,9 +58,7 @@ idf.py -C examples/espidf_basic set-target esp32s2 build
 ```
 
 When local ESP-IDF tooling is unavailable, cite the relevant CI workflow run
-instead. For v1.0.0 release prep on this machine, `idf.py` was not on `PATH`,
-so pure ESP-IDF evidence must come from the GitHub Actions run triggered by the
-release tag. Do not claim a pure ESP-IDF build passed without a local log or a
+instead. Do not claim a pure ESP-IDF build passed without a local log or a
 reviewed CI log for the target commit.
 
 ## Contract Guards

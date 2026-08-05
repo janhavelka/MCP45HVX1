@@ -5,8 +5,8 @@ potentiometer driver for ESP32 (Arduino/PlatformIO and ESP-IDF). The repository
 emphasizes deterministic software behavior, explicit hardware evidence gates,
 and maintained documentation.
 
-Current release status: v1.0.0 pre-production software package. Local software
-validation and an ESP32-S2 safe-only HIL run have passed, but this is not a
+Current software package version: v1.1.0. Local software validation and
+ESP32-S2 safe-only HIL evidence have passed, but this is not a
 production-readiness, analog-accuracy, high-voltage-safety, or General Call
 safety claim.
 
@@ -99,13 +99,14 @@ void setup() {
     return;
   }
 
-  pot.writeWiper(0x80);
-  pot.setTerminalMode(MCP45HVX1::TerminalMode::Potentiometer);
+  MCP45HVX1::RegisterSnapshot snapshot;
+  st = pot.readSnapshot(snapshot);
+  if (!st.ok()) {
+    return;
+  }
 }
 
-void loop() {
-  pot.tick(millis());
-}
+void loop() {}
 ```
 
 The ready-made Arduino transport adapter used by the example CLI is in
@@ -117,7 +118,7 @@ timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 ### Lifecycle
 
 - `Status begin(const Config& config)` - validate config, read Wiper/TCON first, then apply explicit output-changing startup writes if enabled
-- `void tick(uint32_t nowMs)` - no-op reserved hook
+- `void tick(uint32_t nowMs)` - deprecated compatibility no-op; use `pollJob()` for active jobs
 - `void end()` - reset driver object state without changing device terminals
 
 ### Diagnostics
@@ -536,16 +537,21 @@ Hardware validation is not claimed unless the HIL runner was actually run and
 the resulting evidence bundle is attached to the release or validation record.
 The HIL runner is repository tooling and is excluded from normal PlatformIO
 package exports; use the full repository when capturing HIL evidence. The
-ignored `hil_logs/` directory is a local staging area: archive a required bundle
-or commit a curated transcript report before clearing it.
+ignored `hil_logs/` directory is a local staging area. Archive a required
+bundle externally before clearing it. A repository report copy is created only
+when `--report-file <path>` is supplied; long benchmark/soak iterations stay in
+the machine-readable and raw bundle while Markdown keeps aggregate summaries.
 
 Current bundled safe-only evidence:
 
-- [8-hour ESP32-S2 safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md):
+- <a href="docs/reports/hil-validation-COM8-20260629.md">8-hour ESP32-S2 safe-only HIL summary</a>:
   `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency
   `0.188 s`, no output-changing groups requested.
-- [1-hour panic-repro safe-only HIL report](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md):
+- <a href="docs/reports/hil-panic-repro-COM8-20260629.md">1-hour panic-repro safe-only HIL summary</a>:
   `PASS_SAFE_ONLY`, `23056 / 23056 / 0` soak commands.
+- <a href="docs/reports/hil-validation-COM9-20260805.md">Targeted COM9 safe-only HIL report</a>:
+  `PASS_SAFE_ONLY`, 31 executed checks, zero failures, and a final READY
+  MCP45HV51 state at address `0x3C`.
 
 These reports support safe/read-only CLI behavior on the recorded fixture only.
 They do not support analog movement, terminal-current, high-voltage, SHDN/WLAT,
@@ -580,6 +586,7 @@ python tools/check_core_timing_guard.py
 python tools/check_generated_artifacts.py
 python tools/test_run_hil_mcp45hvx1_parser.py
 python scripts/generate_version.py check
+doxygen Doxyfile
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
 cd examples/espidf_basic
@@ -591,10 +598,10 @@ idf.py build
 
 `library.json` defines the package export policy. Normal PlatformIO packages
 include headers, source, examples, metadata, and current core docs. Datasheets,
-tests, tools, CI metadata, local build output, and transcript reports are
+tests, tools, CI metadata, local build output, and HIL evidence reports are
 intentionally excluded from normal packages to keep the install artifact
-focused and reproducible. The full reference corpus, curated transcript
-reports, and release tooling remain in the repository for audit and validation.
+focused and reproducible. The reference corpus, compact HIL summaries, and
+release tooling remain in the repository for audit and validation.
 
 ## Documentation
 
@@ -607,7 +614,7 @@ reports, and release tooling remain in the repository for audit and validation.
 - <a href="docs/MCP45HVX1_RELEASE_CHECKLIST.md">Release Checklist</a>
 - <a href="docs/IDF_PORT.md">ESP-IDF Port</a>
 - [Datasheets and application notes](docs/reference-pdfs/)
-- [Curated HIL transcript reports](docs/reports/)
+- [HIL evidence summaries](docs/reports/)
 - `Doxyfile` indexes the public headers, maintained docs, the Arduino CLI, and
   the native IDF entry point.
 

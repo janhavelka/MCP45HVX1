@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize Version.h from library.json and expose build metadata via macros.
+"""Synchronize release version files and expose build metadata via macros.
 
 Default behavior:
 - when run by PlatformIO as an extra script: sync generated headers if needed and
@@ -8,7 +8,7 @@ Default behavior:
 
 Standalone commands:
   sync
-      Regenerate generated headers only if source metadata changed.
+      Regenerate version files only if source metadata changed.
   check
       Exit with code 1 when generated headers are out of date.
   bump patch|minor|major
@@ -251,6 +251,14 @@ static constexpr const char* VERSION_FULL = {prefix}_VERSION_FULL;
 '''
 
 
+def _replace_required_line(path: Path, pattern: str, replacement: str) -> str:
+    current = _read_text(path)
+    updated, count = re.subn(pattern, replacement, current, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise RuntimeError(f"Expected one version declaration in {path}")
+    return updated
+
+
 def _expected_outputs(project_root: Path) -> Dict[Path, str]:
     library_json = project_root / "library.json"
     library_data = _load_library_json(library_json)
@@ -258,8 +266,18 @@ def _expected_outputs(project_root: Path) -> Dict[Path, str]:
     namespace_dir = _resolve_namespace_dir(project_root)
     namespace = namespace_dir.name
 
+    idf_manifest = project_root / "idf_component.yml"
+    doxyfile = project_root / "Doxyfile"
     outputs = {
         namespace_dir / "Version.h": _render_version_header(namespace, version),
+        idf_manifest: _replace_required_line(
+            idf_manifest, r'^version:\s*"[^"]+"\s*$', f'version: "{version}"'
+        ),
+        doxyfile: _replace_required_line(
+            doxyfile,
+            r'^PROJECT_NUMBER\s*=.*$',
+            f'PROJECT_NUMBER         = "{version}"',
+        ),
     }
 
     return outputs

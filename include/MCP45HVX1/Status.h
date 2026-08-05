@@ -17,7 +17,7 @@ enum class Err : uint8_t {
   DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
   REGISTER_MISMATCH,         ///< Register value does not match expected device behavior
   BUSY,                      ///< Device is busy
-  IN_PROGRESS,               ///< Operation scheduled; call tick() to complete
+  IN_PROGRESS,               ///< Poll-chunked operation remains active; call pollJob() again
   UNSUPPORTED,               ///< Operation is not supported by documented registers
 
   // I2C transport details (append-only to preserve existing values)

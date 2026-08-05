@@ -1,12 +1,12 @@
 # MCP45HVX1 API Contract
 
 This document is the authoritative public API contract for the current
-hardening branch. It describes software behavior only; it is not hardware
+release. It describes software behavior only; it is not hardware
 validation evidence.
 
 ## Release Readiness
 
-The library is a v1.0.0 pre-production software package. Software tests,
+The library is a v1.1.0 pre-production software package. Software tests,
 static guards, and the bundled ESP32-S2 safe-only HIL reports verify transport
 framing, status propagation, cache behavior, CLI contracts, and safe/read-only
 CLI behavior on the recorded fixture. They cannot prove output-changing analog
@@ -162,6 +162,9 @@ work per owner-task poll:
 - `getJobSnapshot()`
 - `getJobSnapshot(JobSnapshot&)`
 - `jobActive()`
+
+The legacy `tick()` function is retained as a deprecated, source-compatible
+no-op. It does not advance jobs; applications must call `pollJob()` explicitly.
 
 One register read or command-write chunk is one instruction. Snapshot jobs read
 Wiper and TCON as separate instructions. Terminal jobs expose the TCON

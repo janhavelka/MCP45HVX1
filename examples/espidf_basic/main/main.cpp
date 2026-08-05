@@ -2012,7 +2012,6 @@ extern "C" void app_main(void) {
     if (fgets(line, sizeof(line), stdin) != nullptr) {
       handleCommand(line);
     }
-    gDev.tick(nowMs(nullptr));
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }

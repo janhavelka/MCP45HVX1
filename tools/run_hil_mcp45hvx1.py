@@ -677,7 +677,7 @@ class HilRun:
                 break
             command = SOAK_COMMANDS[loop_index % len(SOAK_COMMANDS)]
             loop_index += 1
-            result = self.run_command(cli, command, "soak", feature_area="8-hour soak",
+            result = self.run_command(cli, command, "soak", feature_area="Safe-only soak",
                                       timeout=max(self.args.timeout, self.args.stress_timeout_s))
             command_counts[command] = command_counts.get(command, 0) + 1
             latencies.append(result.duration_s)
@@ -715,8 +715,8 @@ class HilRun:
             "max_commands_limit": max_commands,
             "stopped_reason": stopped_reason,
         }
-        self.run_command(cli, "state", "soak-final", feature_area="8-hour soak")
-        self.run_command(cli, "drv", "soak-final", feature_area="8-hour soak")
+        self.run_command(cli, "state", "soak-final", feature_area="Safe-only soak")
+        self.run_command(cli, "drv", "soak-final", feature_area="Safe-only soak")
 
     def record_static_limitations(self) -> None:
         self.record_not_run("not-run", "output-changing matrix", "Output-changing",
@@ -1116,7 +1116,13 @@ class HilRun:
             "| Test ID | Area | Command/Step | Expected | Observed | Elapsed s | Result | Notes |",
             "|---|---|---|---|---|---:|---|---|",
         ])
-        for command in summary["commands"]:
+        summarized_groups = {"benchmark", "soak"}
+        detailed_commands = [
+            command for command in summary["commands"]
+            if command["group"] not in summarized_groups
+        ]
+        summarized_count = len(summary["commands"]) - len(detailed_commands)
+        for command in detailed_commands:
             observed = "see raw_serial.txt"
             if command["result"] in {NOT_RUN, NOT_APPLICABLE, UNKNOWN}:
                 observed = command["result"]
@@ -1125,6 +1131,12 @@ class HilRun:
                 f"`{md(command['command'])}` | {md(command['expected'])} | {md(observed)} | "
                 f"{command['duration_s']:.3f} | {md(command['result'])} | {md(command['notes'])} |"
             )
+        if summarized_count:
+            lines.extend([
+                "",
+                f"- Omitted `{summarized_count}` repeated benchmark/soak rows from this human report; "
+                "see `commands.txt`, `summary.json`, and `raw_serial.txt` in the evidence bundle.",
+            ])
         lines.extend([
             "",
             "## Sampling And Timing",
@@ -1291,14 +1303,6 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     return warnings
 
 
-def default_report_path(port: str | None) -> str | None:
-    if not port:
-        return None
-    safe_port = re.sub(r"[^A-Za-z0-9_-]+", "-", port).strip("-") or "serial"
-    date = datetime.now().strftime("%Y%m%d")
-    return str(ROOT / "docs" / "reports" / f"hil-validation-{safe_port}-{date}.md")
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1306,8 +1310,6 @@ def main(argv: list[str] | None = None) -> int:
         warnings = validate_args(args)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    if args.report_file is None:
-        args.report_file = default_report_path(args.port)
     if args.parser_self_test:
         ok = run_parser_self_test()
         print(f"Parser self-test: {'PASS' if ok else 'FAIL'}")

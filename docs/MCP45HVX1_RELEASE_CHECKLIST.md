@@ -1,164 +1,211 @@
-# MCP45HVX1 Release Checklist
+# MCP45HVX1 v1.1.0 Release Checklist
 
-This checklist gates release claims for this repository. Passing software checks
-alone is not enough to claim production readiness, high-voltage validation,
-analog accuracy, or General Call safety.
+This checklist prepares the v1.1.0 software package and tag. It does not grant
+production-readiness, analog-accuracy, high-voltage-safety, field-deployment,
+or General Call safety approval. Those claims remain gated by the physical
+evidence in [`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md).
 
-Current state: v1.0.0 pre-production software package pending full hardware
-validation. A release tag may be created for the software package after local
-checks pass, but do not describe the release as production-ready, high-voltage
-validated, analog-accurate, or General Call safe without the physical evidence
-gates below.
+## Release Candidate
 
-## Repository State
-
-| Gate | Evidence |
+| Field | Intended value |
 |---|---|
-| Correct release branch | `git branch --show-current` recorded |
-| Clean worktree before release | `git status --short` empty |
-| Remote synchronized | `git pull --ff-only` completed |
-| No generated artifacts | `python tools/check_generated_artifacts.py` passed after packaging |
+| Version | `1.1.0` |
+| Annotated tag | `v1.1.0` |
+| Release title | `MCP45HVX1 v1.1.0` |
+| Branch | `main` |
+| Release type | Pre-production software package |
+| Changelog | [`CHANGELOG.md`](../CHANGELOG.md), section `1.1.0` |
+| Safe-only HIL | COM8 8-hour and 1-hour summaries; targeted COM9 report |
+| Explicit non-claims | Output-changing, analog, high-voltage, SHDN/WLAT, rail-cycle, fault-injection, address-matrix, and General Call safety |
 
-## Version, Changelog, And Tag Policy
+Version metadata must agree in `library.json`, `idf_component.yml`,
+`include/MCP45HVX1/Version.h`, and `Doxyfile`. The tag must point to the exact
+clean commit whose `main` CI passed.
 
-| Gate | Evidence |
-|---|---|
-| Version files agree | `library.json`, `idf_component.yml`, and generated `include/MCP45HVX1/Version.h` reviewed |
-| Version check passed | `python scripts/generate_version.py check` |
-| Changelog finalized | `CHANGELOG.md` has the intended release section and no stale overclaims |
-| Tag status recorded | No tag exists yet, or intended tag such as `v1.0.0` is recorded |
-| Tag created only after approval | Tag command/log recorded if a release is approved |
+## 1. Synchronize And Inspect
 
-If version `1.0.0` is retained before full physical/output-changing evidence
-exists, describe it as an engineering or pre-production package version. Do not
-call it production-ready or industry-grade.
+Run from the repository root:
 
-## Software Validation
+```bash
+git switch main
+git fetch --prune origin
+git pull --ff-only
+git status --short --branch
+git log -1 --oneline --decorate
+git tag --list v1.1.0
+```
 
-On Windows, replace `pio` in individual commands with `.\scripts\pio.cmd`; the
-aggregate `python tools/validate.py` command selects that wrapper automatically.
-Other platforms use `pio` from `PATH`.
+Expected before tagging:
 
-| Gate | Command/evidence |
-|---|---|
-| Python tool syntax | `python -m py_compile scripts/generate_version.py tools/run_hil_mcp45hvx1.py tools/test_run_hil_mcp45hvx1_parser.py tools/check_generated_artifacts.py tools/check_cli_contract.py tools/check_idf_example_contract.py tools/check_core_timing_guard.py` |
-| Core timing guard | `python tools/check_core_timing_guard.py` |
-| Arduino/CLI contract | `python tools/check_cli_contract.py` |
-| ESP-IDF example contract | `python tools/check_idf_example_contract.py` |
-| Generated artifact guard | `python tools/check_generated_artifacts.py` |
-| HIL parser/evidence guard | `python tools/test_run_hil_mcp45hvx1_parser.py` |
-| Version check | `python scripts/generate_version.py check` |
-| Native tests | `pio test -e native` |
-| Arduino ESP32-S3 build | `pio run -e esp32s3dev` |
-| Arduino ESP32-S2 build | `pio run -e esp32s2dev` |
-| Pure ESP-IDF esp32s3 build | `idf.py -C examples/espidf_basic set-target esp32s3 build`, or CI log link |
-| Pure ESP-IDF esp32s2 build | `idf.py -C examples/espidf_basic set-target esp32s2 build`, or CI log link |
-| Remote CI run reviewed | `gh run list --limit 10` or equivalent workflow/log URL |
+- branch is `main`
+- local and `origin/main` are synchronized
+- the worktree is clean
+- `v1.1.0` does not already exist
 
-Remote CI can be cited only when the workflow actually ran for the release
-commit. Local checks and CI checks are separate evidence. The current workflow
-triggers on `main`, `v*` tags, and pull requests to `main`; direct hardening
-branch pushes are not remote CI evidence by themselves.
+Stop on a dirty, divergent, conflicted, or unexpected branch state. Never
+overwrite work to force synchronization.
 
-## v1.0.0 Release Evidence Snapshot
+## 2. Validate Locally
 
-| Field | Evidence |
-|---|---|
-| Package version | `library.json` and `idf_component.yml`: `1.0.0` |
-| Intended tag | `v1.0.0` |
-| Release type | Pre-production software package; not production-readiness approval |
-| Local validation | `python tools/validate.py` passed before this release-prep pass |
-| Package validation | `pio pkg pack` passed during release prep; generated archive removed |
-| Package artifact and size | `MCP45HVX1-1.0.0.tar.gz`, `95527` bytes when packed locally |
-| ESP-IDF local build | Not run locally; `idf.py` was not found on PATH |
-| Remote CI | [Tag `v1.0.0` GitHub Actions run](https://github.com/janhavelka/MCP45HVX1/actions/runs/28450131279) passed all jobs |
-| Safe-only HIL report | [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md) |
-| Safe-only HIL verdict | `PASS_SAFE_ONLY`, `183221 / 183221 / 0` soak commands, worst latency `0.188 s` |
-| Panic repro report | [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md) |
-| Panic repro verdict | `PASS_SAFE_ONLY`, `23056 / 23056 / 0` soak commands |
-| Firmware under HIL | ESP32-S2 `esp32s2dev`, firmware reported `1.0.0 (4de67ab, clean)` |
-| HIL runner caveat | The 8-hour runner recorded repo `dirty=True` because the serial-drain evidence patch was uncommitted during the run; that patch is committed in `b2ae78f` |
-| Remaining non-claims | Output-changing behavior, analog movement, terminal current, high-voltage behavior, SHDN/WLAT physical behavior, rail cycling, fault injection, address strap matrix, and General Call safety |
+Aggregate validation:
 
-## Packaging
+```bash
+python tools/validate.py
+```
 
-| Gate | Evidence |
-|---|---|
-| Package pack | `pio pkg pack` passed |
-| Generated tarball removed | package archive removed before commit |
-| Generated archive ignore policy | `.gitignore` and guard cover `*.tar.gz`, `*.tgz`, and `*.zip` |
-| Export policy reviewed | `library.json` export section reviewed |
-| ESP-IDF file policy reviewed | `idf_component.yml` files/exclude section reviewed |
-| Package size accepted | packed archive size recorded |
-| Large reference docs decision | PDFs and extracted datasheet markdown are intentionally excluded from normal packages |
+On Windows, the validator uses the repository wrapper. For individual
+PlatformIO commands use:
 
-Normal packages should include headers, source, examples, metadata, and current
-core docs. Large reference PDFs and extracted audit markdown stay in the
-repository unless a release explicitly decides to ship them.
+```powershell
+.\scripts\pio.cmd test -e native
+.\scripts\pio.cmd run -e esp32s3dev
+.\scripts\pio.cmd run -e esp32s2dev
+.\scripts\pio.cmd pkg pack
+```
 
-## Documentation Gates
+On Linux/macOS use:
 
-| Gate | Evidence |
-|---|---|
-| API contract current | `docs/MCP45HVX1_API_CONTRACT.md` reviewed |
-| Device reference current | `docs/DEVICE_REFERENCE.md` reviewed |
-| Hardware validation doc current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` reviewed |
-| HIL runner behavior current | `docs/MCP45HVX1_HARDWARE_VALIDATION.md` and `tools/run_hil_mcp45hvx1.py` reviewed |
-| Release checklist current | this file reviewed |
-| Maintained docs structure reviewed | `docs/README.md` links only current docs and reference PDFs |
-| README honesty | no unsupported production/industry/hardware-validation claims |
-| SECURITY/CONTRIBUTING current | no stale persistent-storage or missing-format-tool references |
+```bash
+pio test -e native
+pio run -e esp32s3dev
+pio run -e esp32s2dev
+pio pkg pack
+```
 
-## Silicon And Errata
+The aggregate validator covers:
 
-| Gate | Evidence |
-|---|---|
-| Package marking/date code | recorded in hardware validation log |
-| Datasheet and errata revisions | recorded in hardware validation log |
-| `DS80000649B` review | completed against actual silicon |
-| Affected/unknown silicon decision | isolated bus or shared-bus risk acceptance recorded |
-| General Call release decision | isolated-bus evidence or explicit risk acceptance |
-| CLI General Call warning parity | Arduino and ESP-IDF `gc arm` warnings reviewed |
+- Python tool syntax and HIL parser tests
+- generated version/header consistency
+- core timing, generated-artifact, Arduino CLI, and ESP-IDF boundary guards
+- 74 native tests
+- Arduino ESP32-S2 and ESP32-S3 builds
 
-Treat Rev A1 through `1518NNN`, unreadable markings, or unknown silicon as
-affected until proven otherwise.
+Validate Doxygen separately; warnings are fatal and output stays under ignored
+`.pio/doxygen/`:
 
-## Hardware/HIL Evidence
+```bash
+doxygen Doxyfile
+```
 
-| Gate | Evidence |
-|---|---|
-| HIL runner bundle | `hil_logs/mcp45hvx1_<timestamp>/` attached with `summary.json`, `report.md`, `raw_serial.txt`, `commands.txt`, and `operator_notes.md` |
-| HIL command line recorded | exact `tools/run_hil_mcp45hvx1.py` invocation in `summary.json` |
-| HIL verdict recorded | `summary.json` verdict reviewed |
-| Safe read-only HIL | safe default runner sequence passed with `PASS_SAFE_ONLY` or stronger verdict |
-| Address strap tests | A1/A0 matrix evidence for `0x3C..0x3F` or documented alternate behavior |
-| POR/BOR rail cycling | rail cycle logs, POR defaults, and `TBORD` margin |
-| I2C fault injection | address NACK, data NACK, timeout, bus error, unplug/replug, reset behavior |
-| Output-changing HIL | `PASS_WITH_OUTPUT_CHANGE` or reviewed `OPERATOR_REVIEW_REQUIRED`, baseline, measurement, restore logs |
-| SHDN/WLAT checks | physical override and readback-vs-output observations in `operator_notes.md` if pins are wired |
-| Low-voltage analog evidence | P0A/P0W/P0B voltage/current measurements on safe load |
-| High-voltage evidence | required only if any high-voltage validation claim is made |
-| General Call isolated-bus evidence | ACK/readback/analog measurement on isolated bus |
+If `idf.py` is installed, native ESP-IDF builds may also be recorded:
 
-Safe-only HIL cannot support output-changing, analog-accuracy, high-voltage, or
-General Call safety claims.
+```bash
+idf.py -C examples/espidf_basic set-target esp32s2 build
+idf.py -C examples/espidf_basic set-target esp32s3 build
+```
 
-Use `docs/MCP45HVX1_HARDWARE_VALIDATION.md` for templates and detailed
-measurement requirements.
+Otherwise use the ESP-IDF matrix jobs from GitHub Actions as evidence. Do not
+claim a local ESP-IDF build without a local log.
 
-## Final Signoff
+## 3. Inspect The Package
+
+After `pio pkg pack`, inspect the generated archive and then remove it before
+committing or tagging:
+
+```powershell
+Get-Item .\MCP45HVX1-1.1.0.tar.gz | Select-Object Name,Length,LastWriteTime
+Get-FileHash .\MCP45HVX1-1.1.0.tar.gz -Algorithm SHA256
+Remove-Item -LiteralPath .\MCP45HVX1-1.1.0.tar.gz
+python tools/check_generated_artifacts.py
+git status --short
+```
+
+Normal packages include headers, source, examples, metadata, and maintained
+core Markdown. Tests, tools, CI metadata, PDFs, HIL reports, caches, and local
+build output remain excluded by package policy.
+
+## 4. Review Main-Branch CI
+
+The workflow must pass for the release commit before tagging:
+
+```bash
+gh auth status
+gh run list --workflow CI --branch main --limit 10
+gh run watch <MAIN_RUN_ID> --exit-status
+gh run view <MAIN_RUN_ID> --log-failed
+```
+
+`--log-failed` prints nothing when no job failed. The workflow covers Arduino
+ESP32-S2/ESP32-S3 builds, native tests, package validation, documentation,
+guards, and pure ESP-IDF 6.0.1 builds for both targets.
+
+## 5. Create And Push The Tag
+
+Only after the release commit is clean, synchronized, and green:
+
+```bash
+git switch main
+git pull --ff-only
+git status --short
+python scripts/generate_version.py check
+git tag -a v1.1.0 -m "MCP45HVX1 v1.1.0"
+git show --no-patch --decorate v1.1.0
+git push origin v1.1.0
+```
+
+The tag push triggers CI. Review that tag run before publishing the GitHub
+Release:
+
+```bash
+gh run list --workflow CI --limit 10
+gh run watch <TAG_RUN_ID> --exit-status
+gh run view <TAG_RUN_ID> --log-failed
+```
+
+Do not move or recreate a published release tag. If the tag run fails, fix the
+source on `main`, prepare a new version/tag, and preserve the failed evidence.
+
+## 6. Publish The GitHub Release
+
+Open:
+
+```text
+https://github.com/janhavelka/MCP45HVX1/releases/new
+```
+
+Then:
+
+1. Choose existing tag `v1.1.0`.
+2. Set title to `MCP45HVX1 v1.1.0`.
+3. Use the `1.1.0` changelog section as the release notes; generated comparison
+   notes may be added, but do not replace the safety limits.
+4. Keep the explicit pre-production/non-claim paragraph.
+5. Mark it as the latest release after the tag CI passes.
+6. Publish and verify the release page points to the intended commit.
+
+Optional CLI equivalent:
+
+```bash
+gh release create v1.1.0 --verify-tag --title "MCP45HVX1 v1.1.0" --generate-notes --latest
+```
+
+## Hardware And Documentation Gates
+
+Before making any stronger hardware claim, separately record:
+
+- package marking/date code and errata applicability
+- A1:A0 address matrix and any alternate-range decision
+- POR/BOR rail cycling and `TBORD` margin
+- address NACK, data NACK, timeout, bus error, and unplug/replug behavior
+- safe-load output-changing Wiper/TCON tests with verified restoration
+- low-voltage analog measurements and terminal current
+- SHDN/WLAT physical override behavior
+- isolated-bus General Call evidence
+- high-voltage measurements, if a high-voltage claim is intended
+
+Safe-only HIL and software tests cannot satisfy these gates.
+
+## Final Record
+
+Record these values in the release notes or release issue:
 
 | Field | Value |
 |---|---|
-| Release commit | Pending |
-| Version | Pending |
-| Tag | Pending |
-| CI run | Pending |
-| Package artifact and size | Pending |
-| Hardware evidence bundle | Pending |
-| HIL verdict | Pending |
-| HIL evidence directory/report link | Pending |
-| Hardware HIL actually run | yes / no |
-| Remaining risk acceptances | Pending |
-| Reviewer | Pending |
-| Date | Pending |
+| Release commit | clean `main` tip selected for `v1.1.0` |
+| Main CI URL | record after the release commit passes |
+| Tag CI URL | record after `v1.1.0` passes |
+| Package name / size / SHA-256 | record from the final clean tree |
+| HIL verdict | `PASS_SAFE_ONLY` |
+| Hardware HIL performed for v1.1.0 | targeted COM9 safe-only run |
+| Remaining risk acceptance | all physical/output-changing gates remain open |
+| Reviewer / date | record at publication |

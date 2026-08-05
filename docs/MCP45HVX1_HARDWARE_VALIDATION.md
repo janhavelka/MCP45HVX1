@@ -40,13 +40,14 @@ Complete this header for each validation run:
 
 ## Recorded Safe-Only Evidence
 
-The repository includes safe-only HIL evidence for the current v1.0.0
-pre-production software package:
+The repository includes safe-only HIL evidence for the v1.0.0 and v1.1.0
+pre-production software packages:
 
 | Run | Evidence | Result |
 |---|---|---|
-| 8-hour ESP32-S2 COM8 soak | [`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md) | `PASS_SAFE_ONLY`; `183221 / 183221 / 0` soak commands; worst latency `0.188 s` |
-| 1-hour ESP32-S2 COM8 panic repro | [`docs/reports/hil-panic-repro-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-panic-repro-COM8-20260629.md) | `PASS_SAFE_ONLY`; `23056 / 23056 / 0` soak commands |
+| 8-hour ESP32-S2 COM8 soak | <a href="reports/hil-validation-COM8-20260629.md"><code>hil-validation-COM8-20260629.md</code></a> | `PASS_SAFE_ONLY`; `183221 / 183221 / 0` soak commands; worst latency `0.188 s` |
+| 1-hour ESP32-S2 COM8 panic repro | <a href="reports/hil-panic-repro-COM8-20260629.md"><code>hil-panic-repro-COM8-20260629.md</code></a> | `PASS_SAFE_ONLY`; `23056 / 23056 / 0` soak commands |
+| Targeted ESP32-S2 COM9 run | <a href="reports/hil-validation-COM9-20260805.md"><code>hil-validation-COM9-20260805.md</code></a> | `PASS_SAFE_ONLY`; 31 executed checks, zero failures, final READY MCP45HV51 state at `0x3C` |
 
 These runs exercised safe/read-only CLI paths only. They do not complete the
 output-changing, analog measurement, high-voltage, SHDN/WLAT, address strap,
@@ -69,8 +70,7 @@ rail-cycle, fault-injection, or General Call gates below.
 ## Safe Read-Only Checks
 
 These checks must not intentionally change analog output. The table is a
-reusable per-fixture checklist; for the v1.0.0 COM8 evidence, see
-[`docs/reports/hil-validation-COM8-20260629.md`](https://github.com/janhavelka/MCP45HVX1/blob/v1.0.0/docs/reports/hil-validation-COM8-20260629.md).
+reusable per-fixture checklist; completed run summaries are indexed above.
 
 | Check | Expected evidence | Result |
 |---|---|---|

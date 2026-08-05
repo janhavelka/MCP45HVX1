@@ -166,8 +166,10 @@ public:
   /// @return Status::Ok() when the baseline cache is valid and optional writes, if any, succeeded.
   Status begin(const Config& config);
 
-  /// Process pending operations (currently a no-op).
+  /// Legacy compatibility hook. This function performs no work.
+  /// Use pollJob() to advance poll-chunked operations.
   /// @param nowMs Current monotonic time in milliseconds.
+  [[deprecated("tick() is a no-op; use pollJob() for poll-chunked jobs")]]
   void tick(uint32_t nowMs);
 
   /// Shutdown the driver object. Does not modify the analog terminal state.

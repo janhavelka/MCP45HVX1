@@ -2,9 +2,10 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | Pre-production hardening branch |
+| Version | Supported |
+|---|---|
+| 1.1.x | Current pre-production line |
+| 1.0.x | Security fixes only |
 
 ## Reporting a Vulnerability
 

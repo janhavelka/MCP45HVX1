@@ -1,4 +1,4 @@
-version: "1.0.0"
+version: "1.1.0"
 description: "Framework-neutral MCP45HVX1 high-voltage I2C digital potentiometer driver"
 license: "MIT"
 url: "https://github.com/janhavelka/MCP45HVX1"

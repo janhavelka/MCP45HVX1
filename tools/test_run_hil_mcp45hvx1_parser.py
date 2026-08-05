@@ -252,11 +252,29 @@ class HilParserTests(unittest.TestCase):
             cli = EmptyCli()
 
             run.soak_sequence(cli)
+            run.write_outputs(args)
+
+            report = (run.output_dir / "report.md").read_text(encoding="utf-8")
 
         self.assertTrue(run.soak_summary["requested"])
         self.assertEqual(2, run.soak_summary["failures"])
         self.assertIn("2 consecutive failures", run.soak_summary["stopped_reason"])
+        self.assertTrue(
+            all(
+                result.feature_area == "Safe-only soak"
+                for result in run.commands
+                if result.group in {"soak", "soak-final"}
+            )
+        )
+        self.assertIn("Omitted `2` repeated benchmark/soak rows", report)
+        self.assertNotIn("8-hour soak", report)
         self.assertEqual(hil.FAIL, run.verdict())
+
+    def test_report_copy_is_opt_in(self) -> None:
+        parser = hil.build_parser()
+        args = parser.parse_args(["--dry-run"])
+
+        self.assertIsNone(args.report_file)
 
     def test_output_change_requires_operator_prompts_for_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

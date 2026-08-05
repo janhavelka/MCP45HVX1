@@ -1,5 +1,10 @@
 # MCP45HVX1 HIL Validation Report - COM9
 
+This curated report preserves the generated run metadata, command results,
+timing, and scope limits. The original ignored `hil_logs` staging bundle was
+removed during release cleanup on 2026-08-05; references to its raw files below
+are provenance notes, not repository file links.
+
 Date/time UTC: `2026-08-05T13:29:20+00:00`
 Date/time local: `2026-08-05T15:29:20+02:00`
 Verdict: `PASS_SAFE_ONLY`
@@ -28,13 +33,16 @@ Output directory: `hil_logs\mcp45hvx1_20260805_152913_824232`
 - Benchmark samples per path: `0`.
 - Soak duration requested: `0.0` seconds.
 
-## Evidence Files
+## Original Local Bundle Files
 
 - `raw_serial.txt` - raw command transcript after optional ANSI stripping.
 - `commands.txt` - command list with group, timing, and failure flags.
 - `summary.json` - machine-readable summary and verdict.
 - `operator_notes.md` - measurements, observations, skipped unsafe checks.
 - `report.md` - this report.
+
+These files were generated in the local directory recorded above. They were
+not committed; this curated report is the retained repository evidence.
 
 ## Commands Run
 

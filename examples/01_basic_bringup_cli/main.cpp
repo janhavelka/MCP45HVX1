@@ -2283,8 +2283,6 @@ void setup() {
 }
 
 void loop() {
-  gDev.tick(millis());
-
   String line;
   if (cli_shell::readLine(line)) {
     handleCommand(line);
