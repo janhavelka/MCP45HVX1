@@ -4,7 +4,7 @@
 PROJECT_NAME           = "MCP45HVX1"
 PROJECT_NUMBER         = "1.1.0"
 PROJECT_BRIEF          = "MCP45HVX1 embedded library API documentation"
-OUTPUT_DIRECTORY       = .pio/doxygen
+OUTPUT_DIRECTORY       = .pio
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO
 OUTPUT_LANGUAGE        = English
@@ -44,7 +44,7 @@ SORT_BRIEF_DOCS        = YES
 SORT_MEMBERS_CTORS_1ST = YES
 
 GENERATE_HTML          = YES
-HTML_OUTPUT            = html
+HTML_OUTPUT            = doxygen
 HTML_COLORSTYLE        = AUTO_LIGHT
 GENERATE_LATEX         = NO
 GENERATE_XML           = NO
