@@ -122,6 +122,9 @@ inside comments can hide following code. The shared lexer recognizes comments
 and ordinary/raw literals in one pass while preserving line breaks. The
 strict Doxygen gate is limited to the public API; example documentation does
 not need dozens of unrelated comment edits to enable a useful API check.
+The original warning counts were reproduced with Doxygen 1.15.0: zero for
+the baseline and for the parameter flag alone, 22 for strict headers, and
+103 for strict full input. The final public gate reports zero.
 
 ## Compatibility And Migration
 
@@ -148,14 +151,42 @@ production-readiness claim.
 | HIL parser suite and parser self-test | 19/19 passed; self-test passed. No serial port opened. |
 | Core compilation | Clean optimized compile with the audit's full GCC warning set, including conversion, sign-conversion, shadow, and null-dereference checks. |
 | Native-IDF syntax | Nine console/target configurations compiled against available ESP-IDF 5.5.5 SDK headers. This is supplementary, not pinned 6.0.1 build evidence. |
+| ESP-IDF 6.0.1 firmware builds | Both `esp32s2` and `esp32s3` passed in CI for implementation commit `2c7ab17`. |
 | Doxygen 1.15.0 | Full manual and strict public-API gate passed without diagnostics. Deliberate undocumented-symbol and missing-parameter mutations both fail the strict gate. |
 | Contract/version/artifact checks | Passed. |
-| Full `python tools/validate.py` | First run passed software tests but hit a local PlatformIO Python-environment mismatch before Arduino builds; rerun and final CI results are recorded below when available. |
+| Full `python tools/validate.py` | Passed in full after resolving the local environment mismatch: native/CLI compilation, all tests and guards, and both Arduino S2/S3 builds. |
+| PlatformIO package export | Packed 34 entries; no tests, tools, build artifacts, vendor PDFs, or maintainer audit reports leaked into the package. |
 
 The initial local build failure came from inherited `PLATFORMIO_CORE_DIR=C:\pio`,
-whose package environment disagreed with the selected Python. Selecting
-`$env:PLATFORMIO_CORE_DIR = Join-Path $env:USERPROFILE '.platformio'` is a
-process-local workaround, not a repository or global environment change.
+whose package environment disagreed with the selected Python. The successful
+run used a healthy user core environment and the existing short package paths
+to avoid Windows extraction path limits:
+
+```powershell
+$env:PLATFORMIO_CORE_DIR = Join-Path $env:USERPROFILE '.platformio'
+$env:PLATFORMIO_PACKAGES_DIR = 'C:\pio\packages'
+$env:PLATFORMIO_PLATFORMS_DIR = 'C:\pio\platforms'
+$env:PLATFORMIO_CACHE_DIR = 'C:\pio\.cache'
+python tools/validate.py
+```
+
+These are process-local overrides; no global configuration or registry setting
+was changed. The first CI run caught a fresh-checkout Doxygen output-directory
+issue: the new strict gate initially used a nested output root before `.pio`
+existed. It now inherits the full manual's `.pio` root and selects its own XML
+subdirectory, which Doxygen creates. A clean temporary-checkout check verifies
+the correction.
+
+[CI run 33987542616](https://github.com/janhavelka/MCP45HVX1/actions/runs/33987542616)
+records all six successful non-documentation jobs for implementation commit
+`2c7ab17a46942816904449349b916e16b0b96c2e`: both Arduino targets, both native
+ESP-IDF 6.0.1 targets, native/host tests, and package validation. That run's
+documentation failure is the fresh-output-directory issue described above,
+fixed in the follow-up commit containing these final notes. The follow-up
+changes only the documentation output configuration and this report; the
+validated driver and examples are identical. The
+[CI workflow history](https://github.com/janhavelka/MCP45HVX1/actions/workflows/ci.yml)
+provides the complete follow-up run and logs.
 
 Physical ESP-IDF console HIL, analog restoration/accuracy, SHDN/WLAT, injected
 electrical faults, rail cycling, General Call isolation, and production
