@@ -4,15 +4,45 @@ This document is the authoritative public API contract for the current
 release. It describes software behavior only; it is not hardware
 validation evidence.
 
-## Release Readiness
+## Scope
 
-The library is a v1.1.0 pre-production software package. Software tests,
-static guards, and the bundled ESP32-S2 safe-only HIL reports verify transport
-framing, status propagation, cache behavior, CLI contracts, and safe/read-only
-CLI behavior on the recorded fixture. They cannot prove output-changing analog
+Software tests and static guards verify transport framing, status propagation,
+cache behavior, and CLI contracts. They cannot prove output-changing analog
 behavior, analog accuracy, high-voltage safety, WLAT/SHDN physical output
 behavior, rail-cycle behavior, fault recovery on a physical fault fixture, or
-General Call safety on a shared bus.
+General Call safety on a shared bus. Those gates live in
+[`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md).
+
+## Status Codes
+
+`Err` values returned by the core. The enum is append-only; existing values do
+not change.
+
+| Code | Meaning |
+|---|---|
+| `OK` | Operation succeeded |
+| `NOT_INITIALIZED` | `begin()` has not been called, or `end()` has been |
+| `INVALID_CONFIG` | A `Config` field is missing or invalid |
+| `INVALID_PARAM` | An argument is out of range for the configured variant |
+| `UNSUPPORTED` | The operation is disabled by configuration or has no callback |
+| `BUSY` | A poll job is active, or the driver is latched OFFLINE |
+| `IN_PROGRESS` | `pollJob()` has work remaining; call it again |
+| `DEVICE_NOT_FOUND` | Presence check saw a definite address NACK |
+| `REGISTER_MISMATCH` | Readback did not match the documented register format |
+| `I2C_NACK_ADDR` | Transport reported an address NACK |
+| `I2C_NACK_DATA` | Transport reported a data-byte NACK |
+| `I2C_TIMEOUT` | Transport reported a transaction timeout |
+| `I2C_BUS` | Transport reported a bus error (arbitration loss, stuck line) |
+| `I2C_ERROR` | Transport reported an unclassified I2C failure |
+| `TIMEOUT` | Generic timeout reported by a transport callback |
+
+`Status::ok()` tests for `OK`; `Status::inProgress()` tests for `IN_PROGRESS`.
+`Status::detail` carries a transport-specific value and `Status::msg` a static
+string the driver never owns.
+
+The transport-detail codes are produced by application callbacks. The core maps
+only one of them: a definite address NACK during `begin()` or `probe()` becomes
+`DEVICE_NOT_FOUND`. Everything else is returned as the callback reported it.
 
 ## Transport Ownership
 
@@ -36,10 +66,14 @@ General Call safety on a shared bus.
 
 ## Address, Variant, And RAB Policy
 
-- The documented default address range is `0x3C..0x3F`.
-- The alternate `0x5C..0x5F` range is accepted only when
-  `Config::allowAlternateAddressRange` is explicitly enabled for
-  hardware-verification builds.
+- The documented address range is `0x3C..0x3F` (DS20005304B §6.2.4,
+  Table 6-2).
+- `0x5C..0x5F` are 8-bit *control bytes* of the standard-voltage
+  MCP45XX/46XX family, not 7-bit addresses of this part. They are accepted only
+  when `Config::allowAlternateAddressRange` is explicitly enabled; that option
+  is retained for compatibility only and is scheduled for removal. See
+  [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md) and finding 2 of
+  [`CODE_AUDIT.md`](CODE_AUDIT.md).
 - MCP45HV31 is modeled as 7-bit / 128 taps with POR/BOR Wiper default `0x3F`.
 - MCP45HV51 is modeled as 8-bit / 256 taps with POR/BOR Wiper default `0x7F`.
 - RAB selection is used for nominal helper math and terminal-current limits. It
@@ -111,6 +145,9 @@ the original error and preserves enough runtime state for `readWiper()`,
 - `recover()` does not call `busReset`. It performs tracked Wiper and TCON
   reads. Both must succeed before `recover()` returns OK and marks the driver
   READY.
+- `restorePowerOnDefaults()` writes Wiper 0 first, then TCON0. The default TCON
+  connects every terminal, so writing it first would connect the terminals
+  while Wiper 0 still holds the previous code.
 - Partial recovery keeps any unverified cache entry unknown and preserves
   uncertainty for that state.
 - If recovery starts from OFFLINE and later fails, the OFFLINE latch is
@@ -195,6 +232,9 @@ broadcast and not device-specific; success does not prove the local device was
 the only responder. The core General Call helpers are disabled unless
 `Config::allowGeneralCall` is explicitly true. When disabled, they return
 `UNSUPPORTED` without issuing bus traffic or changing cache/uncertainty state.
+The configuration gate is checked before the OFFLINE latch, so a disabled
+helper reports `UNSUPPORTED` rather than `BUSY` even on an offline driver —
+`recover()` cannot enable a helper that configuration disabled.
 Production firmware must require isolated-bus evidence or a documented
 shared-bus risk acceptance before enabling output-changing General Call use.
 

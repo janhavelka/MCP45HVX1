@@ -255,7 +255,9 @@ def _replace_required_line(path: Path, pattern: str, replacement: str) -> str:
     current = _read_text(path)
     updated, count = re.subn(pattern, replacement, current, count=1, flags=re.MULTILINE)
     if count != 1:
-        raise RuntimeError(f"Expected one version declaration in {path}")
+        raise RuntimeError(
+            f"Expected exactly one line matching {pattern!r} in {path}, found {count}"
+        )
     return updated
 
 
@@ -271,7 +273,7 @@ def _expected_outputs(project_root: Path) -> Dict[Path, str]:
     outputs = {
         namespace_dir / "Version.h": _render_version_header(namespace, version),
         idf_manifest: _replace_required_line(
-            idf_manifest, r'^version:\s*"[^"]+"\s*$', f'version: "{version}"'
+            idf_manifest, r'^version:\s*"?[^"\s]+"?[^\S\n]*$', f'version: "{version}"'
         ),
         doxyfile: _replace_required_line(
             doxyfile,

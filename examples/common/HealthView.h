@@ -87,7 +87,15 @@ inline const char* errName(MCP45HVX1::Err code) {
   }
 }
 
-inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
+/// Print a one-line health summary.
+///
+/// @param dev Driver instance to summarize.
+/// @param outputChanged Application-owned flag for "this CLI changed Wiper/TCON
+///        and has not verified a restore". Reported as `dirty=`; it is a
+///        different signal from the driver's own `uncertain=` state.
+/// @param out Stream to print to.
+inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, bool outputChanged = false,
+                         Print& out = Serial) {
   MCP45HVX1::SettingsSnapshot snap;
   (void)dev.getSettings(snap);
   const MCP45HVX1::DeviceInfo info = dev.getDeviceInfo();
@@ -127,8 +135,8 @@ inline void printSummary(const MCP45HVX1::MCP45HVX1& dev, Print& out = Serial) {
              uncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
              uncertain ? "yes" : "no",
              LOG_COLOR_RESET,
-             uncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
-             uncertain ? "yes" : "no",
+             outputChanged ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+             outputChanged ? "yes" : "no",
              LOG_COLOR_RESET,
              successColor(totalSuccess),
              static_cast<unsigned long>(totalSuccess),

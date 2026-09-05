@@ -1,30 +1,30 @@
-# MCP45HVX1 v1.1.0 Release Checklist
+# MCP45HVX1 Release Checklist
 
-This checklist prepares the v1.1.0 software package and tag. It does not grant
+Runbook for cutting a software release of this library. It does not grant
 production-readiness, analog-accuracy, high-voltage-safety, field-deployment,
-or General Call safety approval. Those claims remain gated by the physical
-evidence in [`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md).
+or General Call safety approval; those remain gated by the physical evidence in
+[`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md).
 
-## Release Candidate
+Throughout, `X.Y.Z` is the version being released and `vX.Y.Z` its annotated
+tag. Release type is a pre-production software package unless the hardware
+gates at the end of this document have been satisfied and recorded.
 
-| Field | Intended value |
-|---|---|
-| Version | `1.1.0` |
-| Annotated tag | `v1.1.0` |
-| Release title | `MCP45HVX1 v1.1.0` |
-| Branch | `main` |
-| Release type | Pre-production software package |
-| Changelog | [`CHANGELOG.md`](../CHANGELOG.md), section `1.1.0` |
-| Safe-only HIL | COM8 8-hour and 1-hour summaries; targeted COM9 report |
-| Explicit non-claims | Output-changing, analog, high-voltage, SHDN/WLAT, rail-cycle, fault-injection, address-matrix, and General Call safety |
+## 1. Set The Version
 
-Version metadata must agree in `library.json`, `idf_component.yml`,
-`include/MCP45HVX1/Version.h`, and `Doxyfile`. The tag must point to the exact
-clean commit whose `main` CI passed.
+`scripts/generate_version.py` is the single source of truth. It propagates the
+version from `library.json` into `include/MCP45HVX1/Version.h`,
+`idf_component.yml`, and `Doxyfile`.
 
-## 1. Synchronize And Inspect
+```bash
+python scripts/generate_version.py set X.Y.Z    # or: bump patch|minor|major
+python scripts/generate_version.py check
+```
 
-Run from the repository root:
+`check` must report all three generated files up to date. The Markdown docs are
+hand-maintained and are not covered by that check — grep for the previous
+version before tagging.
+
+## 2. Synchronize And Inspect
 
 ```bash
 git switch main
@@ -32,38 +32,30 @@ git fetch --prune origin
 git pull --ff-only
 git status --short --branch
 git log -1 --oneline --decorate
-git tag --list v1.1.0
+git tag --list vX.Y.Z
 ```
 
-Expected before tagging:
+Expected: on `main`, synchronized with `origin/main`, clean worktree, and
+`vX.Y.Z` does not already exist. Stop on a dirty, divergent, or conflicted
+state; never force a synchronization over someone's work.
 
-- branch is `main`
-- local and `origin/main` are synchronized
-- the worktree is clean
-- `v1.1.0` does not already exist
-
-Stop on a dirty, divergent, conflicted, or unexpected branch state. Never
-overwrite work to force synchronization.
-
-## 2. Validate Locally
-
-Aggregate validation:
+## 3. Validate Locally
 
 ```bash
 python tools/validate.py
 ```
 
-On Windows, the validator uses the repository wrapper. For individual
-PlatformIO commands use:
+The aggregate validator runs, in order:
 
-```powershell
-.\scripts\pio.cmd test -e native
-.\scripts\pio.cmd run -e esp32s3dev
-.\scripts\pio.cmd run -e esp32s2dev
-.\scripts\pio.cmd pkg pack
-```
+- Python syntax and the HIL evidence parser tests
+- generated version/header consistency
+- the core timing, generated-artifact, Arduino CLI, and ESP-IDF boundary guards
+- three standalone `g++` compiles: the core alone, the Arduino CLI, and the
+  Arduino CLI with color disabled (`MCP45HVX1_CLI_ENABLE_COLOR=0`)
+- the native test suite
+- Arduino ESP32-S2 and ESP32-S3 builds
 
-On Linux/macOS use:
+Individual PlatformIO commands, if needed (`.\scripts\pio.cmd` on Windows):
 
 ```bash
 pio test -e native
@@ -72,119 +64,86 @@ pio run -e esp32s2dev
 pio pkg pack
 ```
 
-The aggregate validator covers:
-
-- Python tool syntax and HIL parser tests
-- generated version/header consistency
-- core timing, generated-artifact, Arduino CLI, and ESP-IDF boundary guards
-- 74 native tests
-- Arduino ESP32-S2 and ESP32-S3 builds
-
-Validate Doxygen separately; warnings are fatal and output stays under ignored
-`.pio/doxygen/`:
+Doxygen is validated separately; warnings are fatal and output stays under the
+ignored `.pio/doxygen/`:
 
 ```bash
 doxygen Doxyfile
 ```
 
-If `idf.py` is installed, native ESP-IDF builds may also be recorded:
+If `idf.py` is installed, record native ESP-IDF builds too; otherwise cite the
+ESP-IDF matrix jobs from CI. Do not claim a local ESP-IDF build without a local
+log.
 
 ```bash
 idf.py -C examples/espidf_basic set-target esp32s2 build
 idf.py -C examples/espidf_basic set-target esp32s3 build
 ```
 
-Otherwise use the ESP-IDF matrix jobs from GitHub Actions as evidence. Do not
-claim a local ESP-IDF build without a local log.
-
-## 3. Inspect The Package
-
-After `pio pkg pack`, inspect the generated archive and then remove it before
-committing or tagging:
+## 4. Inspect The Package
 
 ```powershell
-Get-Item .\MCP45HVX1-1.1.0.tar.gz | Select-Object Name,Length,LastWriteTime
-Get-FileHash .\MCP45HVX1-1.1.0.tar.gz -Algorithm SHA256
-Remove-Item -LiteralPath .\MCP45HVX1-1.1.0.tar.gz
+Get-Item .\MCP45HVX1-X.Y.Z.tar.gz | Select-Object Name,Length,LastWriteTime
+Get-FileHash .\MCP45HVX1-X.Y.Z.tar.gz -Algorithm SHA256
+Remove-Item -LiteralPath .\MCP45HVX1-X.Y.Z.tar.gz
 python tools/check_generated_artifacts.py
 git status --short
 ```
 
-Normal packages include headers, source, examples, metadata, and maintained
-core Markdown. Tests, tools, CI metadata, PDFs, HIL reports, caches, and local
-build output remain excluded by package policy.
+Packages include headers, source, examples, metadata, and the maintained
+Markdown docs. Tests, tools, scripts, CI metadata, PDFs, caches, and local
+build output stay excluded by the policy in `library.json` and
+`idf_component.yml`. Remove the archive before committing or tagging.
 
-## 4. Review Main-Branch CI
-
-The workflow must pass for the release commit before tagging:
+## 5. Review Main-Branch CI
 
 ```bash
-gh auth status
 gh run list --workflow CI --branch main --limit 10
 gh run watch <MAIN_RUN_ID> --exit-status
 gh run view <MAIN_RUN_ID> --log-failed
 ```
 
 `--log-failed` prints nothing when no job failed. The workflow covers Arduino
-ESP32-S2/ESP32-S3 builds, native tests, package validation, documentation,
-guards, and pure ESP-IDF 6.0.1 builds for both targets.
+ESP32-S2/S3 builds, native tests, package validation, documentation, the
+contract guards, and pure ESP-IDF builds for both targets.
 
-## 5. Create And Push The Tag
+## 6. Update The Changelog
 
-Only after the release commit is clean, synchronized, and green:
+Move the `Unreleased` entries into a new `X.Y.Z` section with the release date,
+grouped by change type. State explicitly what the release does *not* claim.
+
+## 7. Tag And Publish
 
 ```bash
-git switch main
-git pull --ff-only
-git status --short
-python scripts/generate_version.py check
-git tag -a v1.1.0 -m "MCP45HVX1 v1.1.0"
-git show --no-patch --decorate v1.1.0
-git push origin v1.1.0
+git tag -a vX.Y.Z -m "MCP45HVX1 vX.Y.Z"
+git show --no-patch --decorate vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-The tag push triggers CI. Review that tag run before publishing the GitHub
-Release:
+The tag push triggers CI. Review that run before publishing the release:
 
 ```bash
-gh run list --workflow CI --limit 10
 gh run watch <TAG_RUN_ID> --exit-status
-gh run view <TAG_RUN_ID> --log-failed
 ```
 
-Do not move or recreate a published release tag. If the tag run fails, fix the
-source on `main`, prepare a new version/tag, and preserve the failed evidence.
-
-## 6. Publish The GitHub Release
-
-Open:
-
-```text
-https://github.com/janhavelka/MCP45HVX1/releases/new
-```
-
-Then:
-
-1. Choose existing tag `v1.1.0`.
-2. Set title to `MCP45HVX1 v1.1.0`.
-3. Use the `1.1.0` changelog section as the release notes; generated comparison
-   notes may be added, but do not replace the safety limits.
-4. Keep the explicit pre-production/non-claim paragraph.
-5. Mark it as the latest release after the tag CI passes.
-6. Publish and verify the release page points to the intended commit.
-
-Optional CLI equivalent:
+Then create the GitHub release against the existing tag, titled
+`MCP45HVX1 vX.Y.Z`, using the changelog section as the release notes and
+keeping the explicit non-claim paragraph. Mark it latest only after the tag CI
+passes.
 
 ```bash
-gh release create v1.1.0 --verify-tag --title "MCP45HVX1 v1.1.0" --generate-notes --latest
+gh release create vX.Y.Z --verify-tag --title "MCP45HVX1 vX.Y.Z" --notes-file <notes> --latest
 ```
+
+Do not move or recreate a published tag. If the tag run fails, fix `main`,
+prepare a new version, and preserve the failed evidence.
 
 ## Hardware And Documentation Gates
 
 Before making any stronger hardware claim, separately record:
 
-- package marking/date code and errata applicability
-- A1:A0 address matrix and any alternate-range decision
+- package marking and date code, and errata applicability (DS80000649B)
+- the A1:A0 address matrix for the populated board
 - POR/BOR rail cycling and `TBORD` margin
 - address NACK, data NACK, timeout, bus error, and unplug/replug behavior
 - safe-load output-changing Wiper/TCON tests with verified restoration
@@ -197,15 +156,14 @@ Safe-only HIL and software tests cannot satisfy these gates.
 
 ## Final Record
 
-Record these values in the release notes or release issue:
+Record in the release notes or release issue:
 
 | Field | Value |
 |---|---|
-| Release commit | clean `main` tip selected for `v1.1.0` |
+| Release commit | clean `main` tip selected for `vX.Y.Z` |
 | Main CI URL | record after the release commit passes |
-| Tag CI URL | record after `v1.1.0` passes |
+| Tag CI URL | record after `vX.Y.Z` passes |
 | Package name / size / SHA-256 | record from the final clean tree |
-| HIL verdict | `PASS_SAFE_ONLY` |
-| Hardware HIL performed for v1.1.0 | targeted COM9 safe-only run |
-| Remaining risk acceptance | all physical/output-changing gates remain open |
+| HIL verdict and fixture | record the run, board, and scope |
+| Remaining risk acceptance | list every gate still open |
 | Reviewer / date | record at publication |

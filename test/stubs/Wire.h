@@ -5,9 +5,15 @@
 #include <cstdint>
 #include <cstddef>
 
+/// TX/RX buffer size, mirroring the macro the real Wire implementations expose
+/// so transports can size their transfers against it.
+#ifndef I2C_BUFFER_LENGTH
+#define I2C_BUFFER_LENGTH 64
+#endif
+
 class TwoWire {
 public:
-  void begin(int sda = -1, int scl = -1) { (void)sda; (void)scl; }
+  bool begin(int sda = -1, int scl = -1) { (void)sda; (void)scl; return true; }
   void setClock(uint32_t freq) { (void)freq; }
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
   uint32_t getTimeOut() const { return _timeoutMs; }
@@ -32,7 +38,11 @@ public:
     }
     return written;
   }
-  uint8_t endTransmission(bool stop = true) { (void)stop; return _endTransmissionResult; }
+  uint8_t endTransmission(bool stop = true) {
+    (void)stop;
+    // Real Wire reports 1 ("data too long to fit in transmit buffer").
+    return _overflow ? 1 : _endTransmissionResult;
+  }
 
   size_t requestFrom(uint8_t addr, size_t len) {
     (void)addr;
@@ -73,9 +83,9 @@ public:
 
 private:
   uint8_t _addr = 0;
-  uint8_t _txBuf[64] = {};
+  uint8_t _txBuf[I2C_BUFFER_LENGTH] = {};
   size_t _txLen = 0;
-  uint8_t _rxBuf[64] = {};
+  uint8_t _rxBuf[I2C_BUFFER_LENGTH] = {};
   size_t _rxLen = 0;
   size_t _rxIdx = 0;
   uint32_t _timeoutMs = 0;

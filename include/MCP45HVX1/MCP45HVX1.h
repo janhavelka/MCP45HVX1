@@ -614,7 +614,8 @@ private:
   static bool _isValidWiperCode(uint8_t code, Resolution resolution);
   static Status _presenceReadFailureStatus(const Status& st);
   static uint8_t _terminalMask(Terminal terminal);
-  static uint8_t _tconForMode(TerminalMode mode);
+  static uint8_t _applyTerminalBit(uint8_t tcon, uint8_t mask, bool enabled);
+  static bool _tconForMode(TerminalMode mode, uint8_t& tcon);
   void _syncRegister(uint8_t reg, uint8_t value);
   void _clearCachedRegisters();
   static bool _isAmbiguousStateWriteFailure(const Status& st);

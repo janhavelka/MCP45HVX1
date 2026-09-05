@@ -1961,8 +1961,10 @@ void test_offline_blocks_normal_operations_without_bus_io() {
   st = dev.readLastAddress(value);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
 
+  // General Call is gated by config before driver state: a disabled helper
+  // reports UNSUPPORTED even while OFFLINE, because recover() cannot enable it.
   st = dev.generalCallWriteWiper(0x44);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED), static_cast<uint8_t>(st.code));
 
   st = dev.restorePowerOnDefaults();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
@@ -2347,6 +2349,126 @@ void test_operations_reject_before_begin() {
                           static_cast<uint8_t>(dev.startRecoverJob().code));
 }
 
+void test_restore_defaults_writes_wiper_before_tcon() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  // Start from software shutdown at zero scale: the default TCON reconnects
+  // every terminal, so it must be written only after the wiper is restored.
+  TEST_ASSERT_TRUE(dev.writeTcon(cmd::TCON_SHUTDOWN).ok());
+  TEST_ASSERT_TRUE(dev.writeWiper(0x00).ok());
+  bus.writeLogCount = 0;
+
+  TEST_ASSERT_TRUE(dev.restorePowerOnDefaults().ok());
+  TEST_ASSERT_EQUAL_UINT8(2u, bus.writeLogCount);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_WIPER0, cmd::Command::WriteData),
+                         bus.writeByte0Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::WIPER_DEFAULT_8BIT, bus.writeByte1Log[0]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::makeCommand(cmd::REG_TCON0, cmd::Command::WriteData),
+                         bus.writeByte0Log[1]);
+  TEST_ASSERT_EQUAL_HEX8(cmd::TCON_DEFAULT, bus.writeByte1Log[1]);
+}
+
+void test_zero_step_job_does_not_publish_a_stale_snapshot() {
+  FakeBus bus;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  // Complete a readback job so a populated snapshot exists.
+  TEST_ASSERT_TRUE(dev.startReadSnapshotJob().ok());
+  while (dev.jobActive()) {
+    (void)dev.pollJob(0, 4);
+  }
+  TEST_ASSERT_TRUE(dev.getJobSnapshot().registersValid);
+
+  // A zero-step job is a no-op, but it must describe itself rather than leave
+  // the previous job's completed readback visible.
+  TEST_ASSERT_TRUE(dev.startIncrementWiperJob(0).ok());
+  JobSnapshot snap = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::IncrementWiper),
+                          static_cast<uint8_t>(snap.type));
+  TEST_ASSERT_FALSE(snap.active);
+  TEST_ASSERT_FALSE(snap.registersValid);
+  TEST_ASSERT_EQUAL_UINT8(0u, snap.instructionsPlanned);
+  TEST_ASSERT_EQUAL_UINT8(0u, snap.instructionsCompleted);
+
+  TEST_ASSERT_TRUE(dev.startDecrementWiperJob(0).ok());
+  snap = dev.getJobSnapshot();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::DecrementWiper),
+                          static_cast<uint8_t>(snap.type));
+  TEST_ASSERT_FALSE(snap.registersValid);
+}
+
+void test_general_call_disabled_reports_unsupported_even_when_offline() {
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  (void)dev.readWiper(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  // recover() cannot enable a helper that configuration disabled, so the
+  // configuration gate must win over the OFFLINE latch.
+  const uint32_t writesBefore = bus.writeCalls;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(dev.generalCallWriteWiper(0x10).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(dev.generalCallWriteTcon(0xFF).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(dev.generalCallIncrementWiper().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                          static_cast<uint8_t>(dev.generalCallDecrementWiper().code));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+}
+
+void test_terminal_mode_and_terminal_bits_round_trip() {
+  struct ModeCase {
+    TerminalMode mode;
+    uint8_t expectedTcon;
+  };
+  const ModeCase cases[] = {
+      {TerminalMode::Potentiometer, cmd::TCON_POTENTIOMETER},
+      {TerminalMode::RheostatBToW, cmd::TCON_RHEOSTAT_B_TO_W},
+      {TerminalMode::RheostatAToW, cmd::TCON_RHEOSTAT_A_TO_W},
+      {TerminalMode::WiperFloating, cmd::TCON_WIPER_FLOATING},
+      {TerminalMode::Shutdown, cmd::TCON_SHUTDOWN},
+  };
+
+  for (const ModeCase& item : cases) {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    TEST_ASSERT_TRUE(dev.setTerminalMode(item.mode).ok());
+    TEST_ASSERT_EQUAL_HEX8(item.expectedTcon, bus.tcon);
+
+    TerminalMode decoded = TerminalMode::Custom;
+    TEST_ASSERT_TRUE(dev.getTerminalMode(decoded).ok());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(item.mode), static_cast<uint8_t>(decoded));
+  }
+
+  const Terminal terminals[] = {Terminal::A, Terminal::W, Terminal::B};
+  for (const Terminal terminal : terminals) {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    for (int pass = 0; pass < 2; ++pass) {
+      const bool enabled = pass != 0;
+      TEST_ASSERT_TRUE(dev.setTerminalEnabled(terminal, enabled).ok());
+      bool readBack = !enabled;
+      TEST_ASSERT_TRUE(dev.getTerminalEnabled(terminal, readBack).ok());
+      TEST_ASSERT_EQUAL_INT(enabled ? 1 : 0, readBack ? 1 : 0);
+      // Reserved bits must survive every read-modify-write.
+      TEST_ASSERT_EQUAL_HEX8(cmd::TCON_RESERVED_MASK, bus.tcon & cmd::TCON_RESERVED_MASK);
+    }
+  }
+}
+
 void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   Wire._clearEndTransmissionResult();
   Wire._clearRequestFromOverride();
@@ -2384,6 +2506,21 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   st = transport::wireWriteRead(0x3C, tooLargeForStub, sizeof(tooLargeForStub),
                                 rx, sizeof(rx), 123, &Wire);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  // A full MAX_COMMAND_CHUNK INC/DEC burst is what the core actually emits, so
+  // the transport must accept exactly that size, not just reject one more.
+  uint8_t fullChunk[cmd::MAX_COMMAND_CHUNK] = {};
+  Wire._clearEndTransmissionResult();
+  st = transport::wireWrite(0x3C, fullChunk, sizeof(fullChunk), 123, &Wire);
+  TEST_ASSERT_TRUE(st.ok());
+
+  // A read that returns no bytes is an unacknowledged address; reporting it as
+  // a generic I2C error would make Err::DEVICE_NOT_FOUND unreachable.
+  Wire._setRequestFromResult(0);
+  st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+                          static_cast<uint8_t>(st.code));
+  Wire._clearRequestFromOverride();
 }
 
 int main() {
@@ -2462,6 +2599,10 @@ int main() {
   RUN_TEST(test_fraction_endpoint_matrix_by_variant);
   RUN_TEST(test_fraction_read_write_helpers);
   RUN_TEST(test_operations_reject_before_begin);
+  RUN_TEST(test_restore_defaults_writes_wiper_before_tcon);
+  RUN_TEST(test_zero_step_job_does_not_publish_a_stale_snapshot);
+  RUN_TEST(test_general_call_disabled_reports_unsupported_even_when_offline);
+  RUN_TEST(test_terminal_mode_and_terminal_bits_round_trip);
   RUN_TEST(test_example_transport_maps_wire_errors_and_read_only_transactions);
 
   return UNITY_END();

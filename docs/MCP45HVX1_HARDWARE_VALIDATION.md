@@ -40,18 +40,55 @@ Complete this header for each validation run:
 
 ## Recorded Safe-Only Evidence
 
-The repository includes safe-only HIL evidence for the v1.0.0 and v1.1.0
-pre-production software packages:
+Safe-only HIL runs recorded against the v1.0.0 and v1.1.0 software packages, all
+on an ESP32-S2 fixture driving an MCP45HV51 at `0x3C`:
 
-| Run | Evidence | Result |
+| Date | Run | Result |
 |---|---|---|
-| 8-hour ESP32-S2 COM8 soak | <a href="reports/hil-validation-COM8-20260629.md"><code>hil-validation-COM8-20260629.md</code></a> | `PASS_SAFE_ONLY`; `183221 / 183221 / 0` soak commands; worst latency `0.188 s` |
-| 1-hour ESP32-S2 COM8 panic repro | <a href="reports/hil-panic-repro-COM8-20260629.md"><code>hil-panic-repro-COM8-20260629.md</code></a> | `PASS_SAFE_ONLY`; `23056 / 23056 / 0` soak commands |
-| Targeted ESP32-S2 COM9 run | <a href="reports/hil-validation-COM9-20260805.md"><code>hil-validation-COM9-20260805.md</code></a> | `PASS_SAFE_ONLY`; 31 executed checks, zero failures, final READY MCP45HV51 state at `0x3C` |
+| 2026-06-30 | 8-hour soak | `PASS_SAFE_ONLY`; 183,221 soak commands, 0 failures; worst latency `0.188 s` |
+| 2026-06-29 | 1-hour soak | `PASS_SAFE_ONLY`; 23,056 soak commands, 0 failures |
+| 2026-08-05 | targeted run | `PASS_SAFE_ONLY`; 31 executed checks, 0 failures, final state READY |
 
 These runs exercised safe/read-only CLI paths only. They do not complete the
 output-changing, analog measurement, high-voltage, SHDN/WLAT, address strap,
 rail-cycle, fault-injection, or General Call gates below.
+
+Generated `hil_logs/` bundles are local, ignored artifacts. Attach the bundle
+for a run to the release record rather than committing it; a per-session
+transcript is provenance for one fixture, not library documentation.
+
+## Running The HIL Runner
+
+`tools/run_hil_mcp45hvx1.py` drives the Arduino or ESP-IDF CLI over serial and
+writes an attachable evidence bundle. It is repository tooling and is excluded
+from package exports; use a full checkout to capture evidence.
+
+```bash
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C     --include-output-change --operator-prompts
+python tools/run_hil_mcp45hvx1.py --port COM15 --baud 115200 --address 0x3C     --include-general-call --confirm-isolated-bus --operator-prompts
+```
+
+The default sequence is safe/read-only and matches the checklist below. Every
+output-changing group requires an explicit flag plus `--operator-prompts`, so
+the operator confirms a safe load and measurement setup first:
+
+- `--include-output-change` captures the Wiper/TCON baseline, writes bounded
+  values, reads back, restores the baseline, and reports
+  `FAIL_RESTORE_UNCERTAIN` if the restore cannot be verified.
+- `--include-shdn` and `--include-wlat` require operator prompts, because
+  physical pin behavior must be observed independently of register readback.
+- `--include-general-call` additionally requires `--confirm-isolated-bus`. The
+  runner records the DS80000649B isolation warning in the evidence.
+
+Each run writes `hil_logs/mcp45hvx1_<timestamp>/` containing `raw_serial.txt`,
+`commands.txt`, `summary.json`, `report.md`, and `operator_notes.md`. That
+directory is git-ignored staging: archive a required bundle with the release
+record before clearing it. `--report-file <path>` additionally writes a report
+copy to a chosen location.
+
+Hardware validation is not claimed unless the runner was actually executed and
+the resulting bundle is attached to a release or validation record.
 
 ## Safety Prerequisites
 
@@ -78,25 +115,33 @@ reusable per-fixture checklist; completed run summaries are indexed above.
 | `version`, `color off`, `help` | Firmware/library version and color-disabled transcript | Pending |
 | `scan`, `addr`, optional address selection | Bus scan and active address recorded | Pending |
 | `probe` | Raw Wiper read result and status; no health/cache mutation claim | Pending |
+| `help wiper`, `? health`, `help gc` | Detailed help shows aliases, safety class, syntax, examples | Pending |
 | `cfg`, `settings`, `state`, `drv`, `health` | Address, variant, cache-known flags, uncertainty, and last status visible | Pending |
-| `readwiper`, `readtcon`, `dump` | Volatile Wiper/TCON and raw pointer readback captured | Pending |
+| `info`, `errata` | Device info and DS80000649B errata summary recorded | Pending |
+| `readwiper`, `readtcon`, `read`, `dump` | Volatile Wiper/TCON and aggregate readback captured | Pending |
+| `reg 0x00`, `reg 0x04`, `last` | Raw register and last-address reads captured | Pending |
 | `selftest safe` | Read-only or state-restoring behavior documented by log | Pending |
 | `stress 100` | Read-only stress summary with no output-changing frames | Pending |
+| `recover` | Tracked Wiper/TCON re-read returns the driver to READY | Pending |
+| `invalid_command`, `reg 0x01`, `addr 0x60` | Invalid input visibly rejected | Pending |
 | Final `state`, final `drv` | Final online/uncertainty/dirty state recorded | Pending |
 
 ## Address Strap Matrix
 
 Record each populated A1:A0 combination:
 
-| A1 | A0 | Expected standard | Alternate candidate | Observed 7-bit address | Pass/fail |
-|---:|---:|---:|---:|---|---|
-| 0 | 0 | `0x3C` | `0x5C` | Pending | Pending |
-| 0 | 1 | `0x3D` | `0x5D` | Pending | Pending |
-| 1 | 0 | `0x3E` | `0x5E` | Pending | Pending |
-| 1 | 1 | `0x3F` | `0x5F` | Pending | Pending |
+| A1 | A0 | Expected 7-bit address | Observed 7-bit address | Pass/fail |
+|---:|---:|---:|---|---|
+| 0 | 0 | `0x3C` | Pending | Pending |
+| 0 | 1 | `0x3D` | Pending | Pending |
+| 1 | 0 | `0x3E` | Pending | Pending |
+| 1 | 1 | `0x3F` | Pending | Pending |
 
-The driver defaults to `0x3C..0x3F`. Use `0x5C..0x5F` only with explicit
-alternate-range opt-in and recorded hardware evidence.
+`0x3C..0x3F` is the only documented range for this part (DS20005304B §6.2.4,
+Table 6-2). A device answering at `0x5C..0x5F` is not an MCP45HVX1 — see the
+addressing section of [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md). The
+`Config::allowAlternateAddressRange` opt-in is retained for compatibility only
+and is scheduled for removal; do not record evidence against it.
 
 ## POR/BOR Rail Cycling
 

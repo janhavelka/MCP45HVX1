@@ -40,12 +40,6 @@ static constexpr uint8_t REG_WIPER0 = 0x00;
 /// Volatile TCON0 terminal-control register. R/W only.
 static constexpr uint8_t REG_TCON0 = 0x04;
 
-/// Lowest address in the documented memory map.
-static constexpr uint8_t MIN_REGISTER = 0x00;
-
-/// Highest address in the documented memory map.
-static constexpr uint8_t MAX_REGISTER = 0xFF;
-
 // ============================================================================
 // Command Byte Format
 // ============================================================================
@@ -140,7 +134,12 @@ static constexpr uint8_t TCON_RHEOSTAT_A_TO_W =
 static constexpr uint8_t TCON_WIPER_FLOATING =
     static_cast<uint8_t>(TCON_RESERVED_MASK | TCON_R0HW | TCON_R0A | TCON_R0B);
 
-/// Maximum command bytes in a single continuous INC/DEC transaction.
+/// Maximum command bytes the driver puts in one continuous INC/DEC transaction.
+///
+/// DS20005304B places no limit on the length of a continuous command sequence;
+/// this bound exists so a single transaction fits a typical I2C transport
+/// buffer and so each poll-job instruction stays short. A transport with a
+/// smaller buffer must reject oversized writes rather than truncate them.
 static constexpr size_t MAX_COMMAND_CHUNK = 64;
 
 // ============================================================================

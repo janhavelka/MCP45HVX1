@@ -1981,7 +1981,8 @@ void handleCommand(char* line) {
   } else if (strcmp(cmd, "verbose") == 0) {
     bool enabled = false;
     if (*args == '\0') {
-      gVerbose = !gVerbose;
+      // No argument shows the current value; it must not toggle it. The help
+      // entry and the Arduino CLI both document "verbose" as a query.
       printf("verbose=%d\n", gVerbose ? 1 : 0);
     } else if (parseBoolArg(args, &enabled)) {
       gVerbose = enabled;

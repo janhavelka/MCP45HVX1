@@ -54,10 +54,15 @@ CI_REQUIRED_TOKENS = [
     "target: ${{ matrix.target }}",
     "path: examples/espidf_basic",
     "command: idf.py set-target ${{ matrix.target }} build",
-    "actions/upload-artifact@v4",
     "esp-idf-build-logs-${{ matrix.target }}",
     "esp32s3",
     "esp32s2",
+]
+
+# Matched as regexes so routine action-version maintenance is not gated by this
+# contract. The contract is that the step exists, not which major it pins.
+CI_REQUIRED_PATTERNS = [
+    r"uses:\s*actions/upload-artifact@v\d+",
 ]
 
 IDF_COMMAND_ACTIONS = {
@@ -165,6 +170,9 @@ def main() -> int:
 
     for token in CI_REQUIRED_TOKENS:
         require_token(ci_text, token, "GitHub Actions ESP-IDF CI")
+    for pattern in CI_REQUIRED_PATTERNS:
+        if re.search(pattern, ci_text) is None:
+            fail(f"GitHub Actions ESP-IDF CI missing pattern: {pattern}")
 
     for path in (ROOT / "examples" / "espidf_basic").rglob("*"):
         if path.is_file() and (

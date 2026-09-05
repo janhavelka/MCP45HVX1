@@ -372,15 +372,14 @@ Status MCP45HVX1::resetI2cState() {
     return _jobBusyStatus();
   }
   if (_config.busReset == nullptr) {
-    return _busResetTracked();
+    return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
+
+  // The device address pointer is unknown once the bus sequence starts, whether
+  // or not the callback reports success.
   _addressPointerKnown = false;
   _addressPointer = cmd::REG_WIPER0;
-  Status st = _busResetTracked();
-  if (!st.ok()) {
-    return st;
-  }
-  return st;
+  return _busResetTracked();
 }
 
 Status MCP45HVX1::restorePowerOnDefaults() {
@@ -391,11 +390,14 @@ Status MCP45HVX1::restorePowerOnDefaults() {
     return _jobBusyStatus();
   }
 
-  Status st = writeTcon(cmd::TCON_DEFAULT);
+  // Wiper before TCON: the default TCON connects every terminal, so writing it
+  // first would connect the analog terminals while Wiper 0 still holds the
+  // previous code. Restoring the wiper first cannot produce that transient.
+  Status st = writeWiper(defaultWiperCode(_config.resolution));
   if (!st.ok()) {
     return st;
   }
-  return writeWiper(defaultWiperCode(_config.resolution));
+  return writeTcon(cmd::TCON_DEFAULT);
 }
 
 // ===========================================================================
@@ -505,14 +507,7 @@ Status MCP45HVX1::setTerminalEnabled(Terminal terminal, bool enabled) {
     return st;
   }
 
-  uint8_t next = tcon;
-  if (enabled) {
-    next = static_cast<uint8_t>(next | mask);
-  } else {
-    next = static_cast<uint8_t>(next & ~mask);
-  }
-  next = sanitizeTcon(next);
-
+  const uint8_t next = _applyTerminalBit(tcon, mask, enabled);
   if (next == tcon) {
     return Status::Ok();
   }
@@ -581,13 +576,11 @@ Status MCP45HVX1::setTerminalMode(TerminalMode mode) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
-  if (mode == TerminalMode::Custom ||
-      (mode != TerminalMode::Potentiometer && mode != TerminalMode::RheostatBToW &&
-       mode != TerminalMode::RheostatAToW && mode != TerminalMode::WiperFloating &&
-       mode != TerminalMode::Shutdown)) {
+  uint8_t tcon = 0;
+  if (!_tconForMode(mode, tcon)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid terminal mode");
   }
-  return writeTcon(_tconForMode(mode));
+  return writeTcon(tcon);
 }
 
 Status MCP45HVX1::getTerminalMode(TerminalMode& mode) {
@@ -808,6 +801,12 @@ Status MCP45HVX1::_startStepJob(JobType type, cmd::Command command, uint8_t step
     return _offlineStatus();
   }
   if (steps == 0) {
+    // Publish a completed no-op for the requested type. Leaving the previous
+    // job's snapshot in place would let a caller read a stale readback result
+    // and attribute it to this call.
+    _resetJob();
+    _job.snapshot.type = type;
+    _job.snapshot.outputChanging = true;
     return Status::Ok();
   }
 
@@ -874,15 +873,8 @@ Status MCP45HVX1::_pollJobOneInstruction() {
         _syncRegister(cmd::REG_TCON0, tcon);
         _markRegisterReadbackVerified(cmd::REG_TCON0);
 
-        const uint8_t mask = _terminalMask(_job.terminal);
-        uint8_t next = tcon;
-        if (_job.terminalEnabled) {
-          next = static_cast<uint8_t>(next | mask);
-        } else {
-          next = static_cast<uint8_t>(next & ~mask);
-        }
-        next = sanitizeTcon(next);
-
+        const uint8_t next = _applyTerminalBit(tcon, _terminalMask(_job.terminal),
+                                               _job.terminalEnabled);
         if (next == tcon) {
           _job.snapshot.instructionsPlanned = 1;
           _completeJob(Status::Ok());
@@ -1203,12 +1195,15 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
   if (len > 1) {
     return Status::Error(Err::INVALID_PARAM, "General Call payload too long");
   }
-  if (_driverState == DriverState::OFFLINE) {
-    return _offlineStatus();
-  }
+  // The configuration gate is checked before the OFFLINE gate: a disabled
+  // General Call stays disabled after recover(), so reporting BUSY would
+  // suggest a retry that can never succeed.
   if (!_config.allowGeneralCall) {
     return Status::Error(Err::UNSUPPORTED,
                          "General Call disabled by Config::allowGeneralCall");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    return _offlineStatus();
   }
 
   uint8_t payload[2] = {commandByte, 0};
@@ -1267,6 +1262,12 @@ Status MCP45HVX1::_presenceReadFailureStatus(const Status& st) {
   return st;
 }
 
+uint8_t MCP45HVX1::_applyTerminalBit(uint8_t tcon, uint8_t mask, bool enabled) {
+  const uint8_t next = enabled ? static_cast<uint8_t>(tcon | mask)
+                               : static_cast<uint8_t>(tcon & ~mask);
+  return sanitizeTcon(next);
+}
+
 uint8_t MCP45HVX1::_terminalMask(Terminal terminal) {
   switch (terminal) {
     case Terminal::A:
@@ -1280,22 +1281,27 @@ uint8_t MCP45HVX1::_terminalMask(Terminal terminal) {
   }
 }
 
-uint8_t MCP45HVX1::_tconForMode(TerminalMode mode) {
+bool MCP45HVX1::_tconForMode(TerminalMode mode, uint8_t& tcon) {
   switch (mode) {
     case TerminalMode::Potentiometer:
-      return cmd::TCON_POTENTIOMETER;
+      tcon = cmd::TCON_POTENTIOMETER;
+      return true;
     case TerminalMode::RheostatBToW:
-      return cmd::TCON_RHEOSTAT_B_TO_W;
+      tcon = cmd::TCON_RHEOSTAT_B_TO_W;
+      return true;
     case TerminalMode::RheostatAToW:
-      return cmd::TCON_RHEOSTAT_A_TO_W;
+      tcon = cmd::TCON_RHEOSTAT_A_TO_W;
+      return true;
     case TerminalMode::WiperFloating:
-      return cmd::TCON_WIPER_FLOATING;
+      tcon = cmd::TCON_WIPER_FLOATING;
+      return true;
     case TerminalMode::Shutdown:
-      return cmd::TCON_SHUTDOWN;
+      tcon = cmd::TCON_SHUTDOWN;
+      return true;
     case TerminalMode::Custom:
-      return cmd::TCON_POTENTIOMETER;
     default:
-      return cmd::TCON_POTENTIOMETER;
+      // Custom is a decode-only result; it has no canonical TCON value.
+      return false;
   }
 }
 

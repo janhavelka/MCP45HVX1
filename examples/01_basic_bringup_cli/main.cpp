@@ -243,7 +243,10 @@ const char* resistanceName(MCP45HVX1::ResistanceOption option) {
 }
 
 bool parseResolution(const char*& p, MCP45HVX1::Resolution& out) {
-  char token[8] = {};
+  // Must hold the longest accepted alias ("mcp45hv31", 9 chars) plus the
+  // terminator; readToken() truncates silently, so a short buffer would make
+  // those aliases permanently unmatchable.
+  char token[12] = {};
   if (!readToken(p, token, sizeof(token))) {
     return false;
   }
@@ -652,7 +655,7 @@ void printStateLine() {
   MCP45HVX1::SettingsSnapshot s;
   (void)gDev.getSettings(s);
   const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
-  const bool dirty = hardwareStateUncertain(s);
+  const bool uncertain = hardwareStateUncertain(s);
   LOG_SERIAL.printf("MCP45HVX1 state: %s%s%s online=%s%s%s addr=0x%02X variant=%s ",
                     LOG_COLOR_STATE(gDev.isOnline(), s.consecutiveFailures),
                     health_view::stateName(s.state),
@@ -674,11 +677,11 @@ void printStateLine() {
   }
   LOG_SERIAL.printf("failures=%u uncertain=%s%s%s dirty=%s%s%s\n",
                     static_cast<unsigned>(s.consecutiveFailures),
-                    dirty ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
-                    dirty ? "yes" : "no",
+                    uncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    uncertain ? "yes" : "no",
                     LOG_COLOR_RESET,
-                    dirty ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
-                    dirty ? "yes" : "no",
+                    gOutputStateUncertain ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
+                    gOutputStateUncertain ? "yes" : "no",
                     LOG_COLOR_RESET);
 }
 
@@ -2029,7 +2032,7 @@ void printStressSummary(uint32_t expectedAttempts) {
                     hardwareStateUncertain(finalSnapshot) ? "yes" : "no",
                     LOG_COLOR_RESET);
   LOG_SERIAL.print("  Final ");
-  health_view::printSummary(gDev);
+  health_view::printSummary(gDev, gOutputStateUncertain);
 }
 
 void runStress(const char* args, bool mixed) {

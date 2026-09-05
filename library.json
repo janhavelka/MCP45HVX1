@@ -63,7 +63,6 @@
       "LICENSE",
       "SECURITY.md",
       "CONTRIBUTING.md",
-      "ASSUMPTIONS.md",
       "docs/*.md"
     ],
     "exclude": [
@@ -73,7 +72,7 @@
       "tests/**",
       "tools/**",
       "docs/**/*.pdf",
-      "docs/reports/**",
+    "docs/CODE_AUDIT.md",
       "*.tar.gz",
       "*.tgz",
       "*.zip"
