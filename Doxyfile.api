@@ -1,0 +1,12 @@
+# Public API documentation is required; the full manual also includes examples.
+@INCLUDE               = Doxyfile
+INPUT                  = include
+USE_MDFILE_AS_MAINPAGE  =
+EXAMPLE_PATH           =
+EXTRACT_ALL            = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+OUTPUT_DIRECTORY       = .pio/doxygen-api
+GENERATE_XML           = YES
+GENERATE_HTML          = NO
+SOURCE_BROWSER         = NO

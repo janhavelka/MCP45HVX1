@@ -315,12 +315,23 @@ Config makeGeneralCallConfig(FakeBus& bus) {
   return cfg;
 }
 
+Status startTestJob(Driver& dev, JobType type) {
+  switch (type) {
+    case JobType::SetWiper: return dev.startSetWiperJob(0x44);
+    case JobType::ReadSnapshot: return dev.startReadSnapshotJob();
+    case JobType::SetTerminal: return dev.startSetTerminalJob(Terminal::A, false);
+    case JobType::IncrementWiper: return dev.startIncrementWiperJob(65);
+    case JobType::DecrementWiper: return dev.startDecrementWiperJob(65);
+    case JobType::Recover: return dev.startRecoverJob();
+    default: return Status::Error(Err::INVALID_PARAM, "Invalid test job");
+  }
+}
+
 }  // namespace
 
 void setUp() {
   setMillis(0);
-  Wire._clearEndTransmissionResult();
-  Wire._clearRequestFromOverride();
+  Wire = TwoWire{};
 }
 
 void tearDown() {}
@@ -358,7 +369,6 @@ void test_config_defaults() {
                           static_cast<uint8_t>(cfg.resolution));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ResistanceOption::R10K),
                           static_cast<uint8_t>(cfg.resistance));
-  TEST_ASSERT_FALSE(cfg.allowAlternateAddressRange);
   TEST_ASSERT_FALSE(cfg.allowGeneralCall);
   TEST_ASSERT_FALSE(cfg.writeInitialWiper);
   TEST_ASSERT_FALSE(cfg.writeInitialTcon);
@@ -391,48 +401,33 @@ void test_begin_rejects_invalid_config() {
   cfg.resistance = static_cast<ResistanceOption>(99);
   st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+
+  cfg = makeConfig(bus);
+  cfg.resolution = static_cast<Resolution>(6);
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_CONFIG, dev.begin(cfg).code);
+  cfg = makeConfig(bus);
+  cfg.resolution = Resolution::Bits7;
+  cfg.writeInitialWiper = true;
+  cfg.initialWiperCode = 0x80;
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_CONFIG, dev.begin(cfg).code);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
 }
 
 void test_begin_address_matrix() {
-  struct AddressCase {
-    uint8_t address;
-    bool allowAlternate;
-    bool expectOk;
-    bool expectAlternate;
-  };
-
-  const AddressCase cases[] = {
-      {0x3C, false, true, false},
-      {0x3D, false, true, false},
-      {0x3E, false, true, false},
-      {0x3F, false, true, false},
-      {0x3B, false, false, false},
-      {0x40, false, false, false},
-      {0x5C, false, false, false},
-      {0x5D, false, false, false},
-      {0x5E, false, false, false},
-      {0x5F, false, false, false},
-      {0x5C, true, true, true},
-      {0x5D, true, true, true},
-      {0x5E, true, true, true},
-      {0x5F, true, true, true},
-      {0x5B, true, false, false},
-      {0x60, true, false, false},
-  };
-
-  for (const AddressCase& tc : cases) {
+  // Validate every byte representable by Config::i2cAddress, including shifted
+  // control bytes and the other family's addresses previously accepted here.
+  for (uint16_t address = 0; address <= 0xFF; ++address) {
     FakeBus bus;
     Driver dev;
     Config cfg = makeConfig(bus);
-    cfg.i2cAddress = tc.address;
-    cfg.allowAlternateAddressRange = tc.allowAlternate;
+    cfg.i2cAddress = static_cast<uint8_t>(address);
 
     Status st = dev.begin(cfg);
-    if (tc.expectOk) {
+    if (address >= 0x3C && address <= 0x3F) {
       TEST_ASSERT_TRUE(st.ok());
       TEST_ASSERT_TRUE(dev.isInitialized());
-      TEST_ASSERT_EQUAL_HEX8(tc.address, dev.getDeviceInfo().i2cAddress);
-      TEST_ASSERT_EQUAL(tc.expectAlternate, dev.getDeviceInfo().usingAlternateAddressRange);
+      TEST_ASSERT_EQUAL_HEX8(address, dev.getDeviceInfo().i2cAddress);
       TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
     } else {
       TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
@@ -663,8 +658,6 @@ void test_device_model_defaults_for_variants_and_registers() {
   TEST_ASSERT_EQUAL_HEX8(0x04, cmd::REG_TCON0);
   TEST_ASSERT_EQUAL_HEX8(0x3C, cmd::MIN_ADDRESS);
   TEST_ASSERT_EQUAL_HEX8(0x3F, cmd::MAX_ADDRESS);
-  TEST_ASSERT_EQUAL_HEX8(0x5C, cmd::ALT_MIN_ADDRESS);
-  TEST_ASSERT_EQUAL_HEX8(0x5F, cmd::ALT_MAX_ADDRESS);
 
   TEST_ASSERT_EQUAL_HEX8(0x7F, Driver::maxWiperCode(Resolution::Bits7));
   TEST_ASSERT_EQUAL_HEX8(0xFF, Driver::maxWiperCode(Resolution::Bits8));
@@ -1949,17 +1942,16 @@ void test_offline_blocks_normal_operations_without_bus_io() {
   const uint32_t writesAfterOffline = bus.writeCalls;
 
   st = dev.readWiper(value);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
-  TEST_ASSERT_EQUAL_STRING("Driver is offline; call recover()", st.msg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE), static_cast<uint8_t>(st.code));
 
   st = dev.writeWiper(0x44);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE), static_cast<uint8_t>(st.code));
 
   st = dev.incrementWiper();
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE), static_cast<uint8_t>(st.code));
 
   st = dev.readLastAddress(value);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE), static_cast<uint8_t>(st.code));
 
   // General Call is gated by config before driver state: a disabled helper
   // reports UNSUPPORTED even while OFFLINE, because recover() cannot enable it.
@@ -1967,7 +1959,7 @@ void test_offline_blocks_normal_operations_without_bus_io() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED), static_cast<uint8_t>(st.code));
 
   st = dev.restorePowerOnDefaults();
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE), static_cast<uint8_t>(st.code));
 
   TEST_ASSERT_EQUAL_UINT32(readsAfterOffline, bus.readCalls);
   TEST_ASSERT_EQUAL_UINT32(writesAfterOffline, bus.writeCalls);
@@ -2031,7 +2023,7 @@ void test_failed_recover_from_offline_reasserts_latch_after_partial_success() {
 
   const uint32_t readsAfterRecover = bus.readCalls;
   st = dev.readWiper(value);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OFFLINE),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(readsAfterRecover, bus.readCalls);
 }
@@ -2478,7 +2470,7 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   const uint8_t byte = 0x55;
   Wire._setEndTransmissionResult(2);
   Status st = transport::wireWrite(0x3C, &byte, 1, 123, &Wire);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(123u, Wire.getTimeOut());
 
@@ -2514,17 +2506,396 @@ void test_example_transport_maps_wire_errors_and_read_only_transactions() {
   st = transport::wireWrite(0x3C, fullChunk, sizeof(fullChunk), 123, &Wire);
   TEST_ASSERT_TRUE(st.ok());
 
-  // A read that returns no bytes is an unacknowledged address; reporting it as
-  // a generic I2C error would make Err::DEVICE_NOT_FOUND unreachable.
+  // ESP32 Wire returns zero for several failures, including timeout; the
+  // adapter cannot infer an address NACK from the byte count alone.
   Wire._setRequestFromResult(0);
   st = transport::wireWriteRead(0x3C, nullptr, 0, rx, sizeof(rx), 123, &Wire);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(st.code));
   Wire._clearRequestFromOverride();
 }
 
+void test_startup_orders_from_current_and_requested_connections() {
+  struct Case { uint8_t current; uint8_t target; bool tconFirst; };
+  const Case cases[] = {
+      {0xF8, 0xFF, false}, {0xF7, 0xFF, false},
+      {0xF8, 0xFB, false}, {0xFD, 0xFB, false}, {0xF7, 0xFB, false},
+      {0xFB, 0xFE, false}, {0xFF, 0xFB, true}, {0xFF, 0xFD, true},
+      {0xFF, 0xF7, true}, {0xF8, 0xF7, true}, {0xFB, 0xFB, true},
+  };
+  for (const Case& tc : cases) {
+    for (uint8_t failurePhase = 0; failurePhase < 3; ++failurePhase) {
+      FakeBus bus;
+      bus.wiper = 0x11;
+      bus.tcon = tc.current;
+      Config cfg = makeConfig(bus);
+      cfg.writeInitialWiper = true;
+      cfg.initialWiperCode = 0x66;
+      cfg.writeInitialTcon = true;
+      cfg.initialTcon = tc.target;
+      // 0 and 1 fail after mutation on that write; 2 means full success.
+      if (failurePhase < 2) {
+        bus.writeErrorAfterMutationRemaining = 1;
+        bus.writeErrorAfterMutationSkip = failurePhase;
+        bus.writeError = Status::Error(Err::I2C_TIMEOUT, "startup mutation", -53);
+      }
+      Driver dev;
+      const Status st = dev.begin(cfg);
+      TEST_ASSERT_EQUAL_UINT8(failurePhase < 2 ? Err::I2C_TIMEOUT : Err::OK, st.code);
+      const uint8_t writes = failurePhase == 0 ? 1 : 2;
+      TEST_ASSERT_EQUAL_UINT32(writes, bus.writeCalls);
+      TEST_ASSERT_EQUAL_HEX8(tc.tconFirst ? 0x40 : 0x00, bus.writeByte0Log[0]);
+      if (writes == 2) {
+        TEST_ASSERT_EQUAL_HEX8(tc.tconFirst ? 0x00 : 0x40, bus.writeByte0Log[1]);
+      }
+      TEST_ASSERT_TRUE(dev.isInitialized());
+      const SettingsSnapshot settings = dev.getSettings();
+      TEST_ASSERT_EQUAL(failurePhase < 2, settings.hardwareStateUncertain);
+      if (failurePhase < 2) {
+        const bool failedTcon = (failurePhase == 0) == tc.tconFirst;
+        TEST_ASSERT_EQUAL(!failedTcon, settings.cachedTconKnown);
+        TEST_ASSERT_EQUAL(failedTcon, settings.cachedWiperKnown);
+        TEST_ASSERT_EQUAL_INT32(-53, settings.hardwareStateUncertainError.detail);
+      }
+      TEST_ASSERT_EQUAL_HEX8((writes == 2 || !tc.tconFirst) ? 0x66 : 0x11, bus.wiper);
+      TEST_ASSERT_EQUAL_HEX8((writes == 2 || tc.tconFirst) ? tc.target : tc.current, bus.tcon);
+    }
+  }
+}
+
+void test_failed_begin_baseline_paths_clear_runtime_state() {
+  for (uint8_t failure = 0; failure < 4; ++failure) {
+    FakeBus bus;
+    Driver dev;
+    Config cfg = makeConfig(bus);
+    TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+    TEST_ASSERT_TRUE(dev.writeWiper(0x55).ok());
+    TEST_ASSERT_TRUE(dev.startReadSnapshotJob().ok());
+    cfg.requirePowerOnDefaults = failure >= 2;
+    cfg.i2cAddress = 0x3F;
+    if (failure < 2) {
+      bus.failReadCall = bus.readCalls + failure + 1U;
+    } else if (failure == 3) {
+      bus.wiper = cmd::WIPER_DEFAULT_8BIT;
+      bus.tcon = 0xFB;
+    }
+    const uint32_t writesBefore = bus.writeCalls;
+    const Status st = dev.begin(cfg);
+    TEST_ASSERT_EQUAL_UINT8(failure < 2 ? Err::I2C_ERROR : Err::REGISTER_MISMATCH, st.code);
+    const SettingsSnapshot s = dev.getSettings();
+    TEST_ASSERT_FALSE(s.initialized);
+    TEST_ASSERT_EQUAL_UINT8(DriverState::UNINIT, s.state);
+    TEST_ASSERT_NULL(s.config.i2cWrite);
+    TEST_ASSERT_NULL(s.config.i2cWriteRead);
+    TEST_ASSERT_NULL(s.config.i2cUser);
+    TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, s.config.i2cAddress);
+    TEST_ASSERT_FALSE(s.cachedWiperKnown);
+    TEST_ASSERT_FALSE(s.cachedTconKnown);
+    TEST_ASSERT_FALSE(s.addressPointerKnown);
+    TEST_ASSERT_FALSE(s.hardwareStateUncertain);
+    TEST_ASSERT_EQUAL_UINT32(0, s.totalSuccess);
+    TEST_ASSERT_EQUAL_UINT32(0, s.totalFailures);
+    TEST_ASSERT_EQUAL_UINT8(0, s.consecutiveFailures);
+    TEST_ASSERT_EQUAL_UINT32(0, s.lastOkMs);
+    TEST_ASSERT_EQUAL_UINT32(0, s.lastErrorMs);
+    TEST_ASSERT_TRUE(s.lastError.ok());
+    TEST_ASSERT_EQUAL_UINT8(JobType::None, dev.getJobSnapshot().type);
+    TEST_ASSERT_FALSE(dev.jobActive());
+    TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  }
+}
+
+void test_poll_without_a_started_job_is_invalid() {
+  Driver dev;
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_PARAM, dev.pollJob(0, 1).code);
+  FakeBus bus;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_PARAM, dev.pollJob(0, 1).code);
+  TEST_ASSERT_TRUE(dev.startReadSnapshotJob().ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 2).ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 2).ok());
+  TEST_ASSERT_EQUAL_UINT32(4, bus.readCalls);
+  dev.end();
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_PARAM, dev.pollJob(0, 1).code);
+}
+
+void test_job_busy_offline_and_end_guards_are_bus_silent() {
+  const JobType types[] = {JobType::SetWiper, JobType::ReadSnapshot, JobType::SetTerminal,
+                          JobType::IncrementWiper, JobType::DecrementWiper, JobType::Recover};
+  FakeBus bus;
+  Driver dev;
+  Config cfg = makeGeneralCallConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  TEST_ASSERT_TRUE(dev.startReadSnapshotJob().ok());
+  for (JobType type : types) {
+    TEST_ASSERT_EQUAL_UINT8(Err::BUSY, startTestJob(dev, type).code);
+    TEST_ASSERT_EQUAL_UINT8(JobType::ReadSnapshot, dev.getJobSnapshot().type);
+  }
+  TEST_ASSERT_EQUAL_UINT8(Err::BUSY, dev.probe().code);
+  TEST_ASSERT_EQUAL_UINT8(Err::BUSY, dev.generalCallWriteWiper(0x44).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::BUSY, dev.generalCallWriteTcon(0xFF).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::BUSY, dev.generalCallIncrementWiper().code);
+  TEST_ASSERT_EQUAL_UINT8(Err::BUSY, dev.generalCallDecrementWiper().code);
+  dev.end();
+  TEST_ASSERT_FALSE(dev.jobActive());
+  TEST_ASSERT_EQUAL_UINT8(JobType::None, dev.getJobSnapshot().type);
+  TEST_ASSERT_EQUAL_UINT32(2, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  bus.readErrorRemaining = 1;
+  uint8_t value = 0;
+  TEST_ASSERT_EQUAL_UINT8(Err::I2C_ERROR, dev.readWiper(value).code);
+  for (JobType type : types) {
+    if (type != JobType::Recover) {
+      TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, startTestJob(dev, type).code);
+      TEST_ASSERT_EQUAL_UINT8(JobType::None, dev.getJobSnapshot().type);
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.startIncrementWiperJob(0).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.startDecrementWiperJob(0).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.generalCallWriteWiper(0x44).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.generalCallWriteTcon(0xFF).code);
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.generalCallIncrementWiper().code);
+  TEST_ASSERT_EQUAL_UINT8(Err::OFFLINE, dev.generalCallDecrementWiper().code);
+  TEST_ASSERT_FALSE(dev.hardwareStateUncertain());
+  TEST_ASSERT_EQUAL_UINT32(5, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+  TEST_ASSERT_TRUE(dev.startRecoverJob().ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 2).ok());
+  TEST_ASSERT_EQUAL_UINT8(DriverState::READY, dev.state());
+}
+
+void test_job_failures_stop_at_each_instruction() {
+  struct Case { JobType type; uint8_t phase; bool writeFailure; };
+  const Case cases[] = {
+      {JobType::SetWiper, 0, true},
+      {JobType::ReadSnapshot, 0, false}, {JobType::ReadSnapshot, 1, false},
+      {JobType::SetTerminal, 0, false}, {JobType::SetTerminal, 1, true},
+      {JobType::IncrementWiper, 0, true}, {JobType::IncrementWiper, 1, true},
+      {JobType::DecrementWiper, 0, true}, {JobType::DecrementWiper, 1, true},
+      {JobType::Recover, 0, false}, {JobType::Recover, 1, false},
+  };
+  for (const Case& tc : cases) {
+    FakeBus bus;
+    Driver dev;
+    Config cfg = makeConfig(bus);
+    TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+    if (tc.type == JobType::Recover) {
+      bus.readErrorRemaining = cfg.offlineThreshold;
+      uint8_t value = 0;
+      for (uint8_t n = 0; n < cfg.offlineThreshold; ++n) {
+        TEST_ASSERT_FALSE(dev.readWiper(value).ok());
+      }
+      TEST_ASSERT_EQUAL_UINT8(DriverState::OFFLINE, dev.state());
+    }
+    TEST_ASSERT_TRUE(startTestJob(dev, tc.type).ok());
+    const uint32_t readsBefore = bus.readCalls;
+    const uint32_t writesBefore = bus.writeCalls;
+    TEST_ASSERT_TRUE(dev.pollJob(bus.nowMs, 0).inProgress());
+    TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+    TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+    for (uint8_t phase = 0; phase < tc.phase; ++phase) {
+      TEST_ASSERT_TRUE(dev.pollJob(bus.nowMs, 1).inProgress());
+    }
+    bus.readError = bus.writeError = Status::Error(Err::I2C_TIMEOUT, "job phase failed", -54);
+    if (tc.writeFailure) {
+      bus.writeErrorAfterMutationRemaining = 1;
+      bus.failAfterAppliedCommands = 1;
+    } else {
+      bus.failReadCall = bus.readCalls + 1;
+    }
+    const Status st = dev.pollJob(bus.nowMs, 10);
+    TEST_ASSERT_EQUAL_UINT8(Err::I2C_TIMEOUT, st.code);
+    TEST_ASSERT_EQUAL_INT32(-54, st.detail);
+    const JobSnapshot job = dev.getJobSnapshot();
+    TEST_ASSERT_FALSE(job.active);
+    TEST_ASSERT_FALSE(job.registersValid);
+    TEST_ASSERT_EQUAL_UINT8(tc.phase, job.instructionsCompleted);
+    TEST_ASSERT_EQUAL_UINT8(1, job.lastPollInstructions);
+    const SettingsSnapshot settings = dev.getSettings();
+    TEST_ASSERT_EQUAL(tc.writeFailure, settings.hardwareStateUncertain);
+    if (tc.writeFailure) {
+      const bool tconFailure = tc.type == JobType::SetTerminal;
+      TEST_ASSERT_EQUAL(!tconFailure, settings.cachedTconKnown);
+      TEST_ASSERT_EQUAL(tconFailure, settings.cachedWiperKnown);
+    }
+    TEST_ASSERT_EQUAL_UINT8(tc.type == JobType::Recover ? DriverState::OFFLINE : DriverState::DEGRADED,
+                            settings.state);
+    if (tc.type == JobType::Recover) {
+      TEST_ASSERT_TRUE(settings.consecutiveFailures >= cfg.offlineThreshold);
+    }
+    TEST_ASSERT_EQUAL_UINT32(tc.phase + 1U,
+                            bus.readCalls + bus.writeCalls - readsBefore - writesBefore);
+    const uint32_t callsAfter = bus.readCalls + bus.writeCalls;
+    TEST_ASSERT_EQUAL_UINT8(Err::I2C_TIMEOUT, dev.pollJob(bus.nowMs, 10).code);
+    TEST_ASSERT_EQUAL_UINT32(callsAfter, bus.readCalls + bus.writeCalls);
+  }
+}
+
+void test_step_chunk_boundaries_and_variant_saturation() {
+  const uint8_t counts[] = {1, 63, 64, 65, 128, 129, 192, 255};
+  for (Resolution resolution : {Resolution::Bits7, Resolution::Bits8}) {
+    for (bool increment : {false, true}) {
+      for (uint8_t steps : counts) {
+        FakeBus bus;
+        bus.resolution = resolution;
+        const uint8_t max = Driver::maxWiperCode(resolution);
+        bus.wiper = increment ? 0 : max;
+        Driver dev;
+        TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+        TEST_ASSERT_TRUE((increment ? dev.startIncrementWiperJob(steps) : dev.startDecrementWiperJob(steps)).ok());
+        const uint8_t planned = steps <= 64 ? 1 : steps <= 128 ? 2 : steps <= 192 ? 3 : 4;
+        TEST_ASSERT_EQUAL_UINT8(planned, dev.getJobSnapshot().instructionsPlanned);
+        for (uint8_t poll = 0; poll < planned; ++poll) {
+          const Status st = dev.pollJob(0, 255);
+          TEST_ASSERT_EQUAL(poll + 1 < planned, st.inProgress());
+          TEST_ASSERT_EQUAL(poll + 1 == planned, st.ok());
+          TEST_ASSERT_EQUAL_UINT32(poll + 1, bus.writeCalls);
+          TEST_ASSERT_EQUAL_UINT8(1, dev.getJobSnapshot().lastPollInstructions);
+          TEST_ASSERT_TRUE(bus.writeLenLog[poll] <= 64);
+          TEST_ASSERT_EQUAL_HEX8(increment ? 0x04 : 0x08, bus.writeByte0Log[poll]);
+        }
+        const uint8_t expected = increment ? (steps > max ? max : steps) : (steps > max ? 0 : max - steps);
+        TEST_ASSERT_EQUAL_HEX8(expected, bus.wiper);
+        TEST_ASSERT_EQUAL_HEX8(expected, dev.getSettings().cachedWiper);
+        TEST_ASSERT_TRUE(dev.getSettings().cachedWiperKnown);
+        TEST_ASSERT_EQUAL_UINT8(planned, dev.getJobSnapshot().instructionsCompleted);
+        TEST_ASSERT_EQUAL_UINT8(steps - 64U * (planned - 1U), bus.writeLenLog[planned - 1U]);
+
+        // The synchronous sender must obey the same transaction bound.
+        bus.writeCalls = 0;
+        bus.writeLogCount = 0;
+        TEST_ASSERT_TRUE((increment ? dev.incrementWiper(steps) : dev.decrementWiper(steps)).ok());
+        TEST_ASSERT_EQUAL_UINT32(planned, bus.writeCalls);
+        TEST_ASSERT_EQUAL_HEX8(bus.wiper, dev.getSettings().cachedWiper);
+      }
+    }
+  }
+}
+
+void test_seven_bit_wiper_job_rejects_out_of_range_without_io() {
+  FakeBus bus;
+  bus.resolution = Resolution::Bits7;
+  bus.wiper = cmd::WIPER_DEFAULT_7BIT;
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_EQUAL_UINT8(Err::INVALID_PARAM, dev.startSetWiperJob(0x80).code);
+  TEST_ASSERT_FALSE(dev.jobActive());
+  TEST_ASSERT_EQUAL_UINT32(2, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+  TEST_ASSERT_TRUE(dev.startSetWiperJob(0x7F).ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 1).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x7F, bus.wiper);
+}
+
+void test_local_callback_errors_preserve_health_and_certainty() {
+  const Err errors[] = {Err::INVALID_CONFIG, Err::INVALID_PARAM, Err::NOT_INITIALIZED, Err::UNSUPPORTED};
+  for (Err error : errors) {
+    FakeBus bus;
+    Driver dev;
+    TEST_ASSERT_TRUE(dev.begin(makeGeneralCallConfig(bus)).ok());
+    uint8_t value = 0;
+    bus.readErrorRemaining = 1;
+    TEST_ASSERT_FALSE(dev.readWiper(value).ok());
+    const SettingsSnapshot before = dev.getSettings();
+    bus.nowMs += 100;
+    bus.readError = bus.writeError = bus.resetStatus = Status::Error(error, "local transport rejection", -55);
+    bus.readErrorRemaining = 2;
+    bus.writeErrorRemaining = 3;
+    TEST_ASSERT_EQUAL_UINT8(error, dev.readWiper(value).code);
+    TEST_ASSERT_EQUAL_UINT8(error, dev.readLastAddress(value).code);
+    TEST_ASSERT_EQUAL_UINT8(error, dev.writeWiper(0x22).code);
+    TEST_ASSERT_EQUAL_UINT8(error, dev.incrementWiper(255).code);
+    TEST_ASSERT_EQUAL_UINT8(error, dev.generalCallIncrementWiper().code);
+    TEST_ASSERT_EQUAL_UINT8(error, dev.resetI2cState().code);
+    const SettingsSnapshot after = dev.getSettings();
+    TEST_ASSERT_EQUAL_UINT8(before.state, after.state);
+    TEST_ASSERT_EQUAL_UINT8(before.consecutiveFailures, after.consecutiveFailures);
+    TEST_ASSERT_EQUAL_UINT32(before.totalFailures, after.totalFailures);
+    TEST_ASSERT_EQUAL_UINT32(before.totalSuccess, after.totalSuccess);
+    TEST_ASSERT_EQUAL_UINT32(before.lastOkMs, after.lastOkMs);
+    TEST_ASSERT_EQUAL_UINT32(before.lastErrorMs, after.lastErrorMs);
+    TEST_ASSERT_EQUAL_UINT8(before.lastError.code, after.lastError.code);
+    TEST_ASSERT_FALSE(after.hardwareStateUncertain);
+    TEST_ASSERT_TRUE(after.cachedWiperKnown);
+    TEST_ASSERT_EQUAL_HEX8(before.cachedWiper, after.cachedWiper);
+  }
+}
+
+void test_wire_random_read_uses_repeated_start_and_distinct_addresses() {
+  const uint8_t tx = 0x0C;
+  const uint8_t data[] = {0, 0x45};
+  uint8_t rx[4] = {};
+  Wire._setReadData(data, sizeof(data));
+  TEST_ASSERT_TRUE(transport::wireWriteRead(0x3D, &tx, 1, rx, 2, 10, &Wire).ok());
+  TEST_ASSERT_FALSE(Wire.lastStop());
+  TEST_ASSERT_TRUE(Wire.lastReadRepeatedStart());
+  TEST_ASSERT_EQUAL_HEX8(0x3D, Wire.lastWriteAddress());
+  TEST_ASSERT_EQUAL_HEX8(0x3D, Wire.lastReadAddress());
+  TEST_ASSERT_EQUAL_UINT32(1, Wire.beginTransmissionCalls());
+  TEST_ASSERT_EQUAL_UINT32(1, Wire.endTransmissionCalls());
+  TEST_ASSERT_EQUAL_UINT32(1, Wire.requestFromCalls());
+  TEST_ASSERT_EQUAL_HEX8(0x45, rx[1]);
+
+  TEST_ASSERT_TRUE(transport::wireWrite(0, &tx, 1, 10, &Wire).ok());
+  TEST_ASSERT_TRUE(Wire.lastStop());
+  TEST_ASSERT_EQUAL_HEX8(0, Wire.lastWriteAddress());
+  TEST_ASSERT_TRUE(transport::wireWriteRead(0x3E, nullptr, 0, rx, 2, 10, &Wire).ok());
+  TEST_ASSERT_FALSE(Wire.lastReadRepeatedStart());
+  TEST_ASSERT_EQUAL_HEX8(0x3E, Wire.lastReadAddress());
+  TEST_ASSERT_EQUAL_UINT32(2, Wire.beginTransmissionCalls());
+  TEST_ASSERT_EQUAL_UINT32(2, Wire.endTransmissionCalls());
+
+  const uint8_t shortData[] = {0x69};
+  Wire._setReadData(shortData, sizeof(shortData));
+  TEST_ASSERT_EQUAL_UINT8(Err::I2C_ERROR,
+                         transport::wireWriteRead(0x3C, &tx, 1, rx, 4, 10, &Wire).code);
+  TEST_ASSERT_EQUAL_INT(1, Wire.available());
+  TEST_ASSERT_EQUAL_HEX8(0x69, Wire.read());
+  TEST_ASSERT_EQUAL_INT(0, Wire.available());
+  TEST_ASSERT_EQUAL_INT(-1, Wire.read());
+
+  Wire._setEndTransmissionResult(3);
+  const uint32_t requestsBefore = Wire.requestFromCalls();
+  TEST_ASSERT_EQUAL_UINT8(Err::I2C_NACK_DATA,
+                         transport::wireWriteRead(0x3C, &tx, 1, rx, 2, 10, &Wire).code);
+  TEST_ASSERT_EQUAL_UINT32(requestsBefore, Wire.requestFromCalls());
+  TEST_ASSERT_FALSE(Wire.lastStop());
+}
+
+void test_esp32_wire_ambiguous_nack_preserves_uncertainty() {
+  FakeBus bus;
+  Config cfg = makeConfig(bus);
+  cfg.i2cWrite = [](uint8_t addr, const uint8_t* data, size_t len,
+                    uint32_t timeoutMs, void*) -> Status {
+    return transport::wireWrite(addr, data, len, timeoutMs, &Wire);
+  };
+  Driver dev;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  Wire._setEndTransmissionResult(2);
+  const Status st = dev.writeWiper(0x33);
+  TEST_ASSERT_EQUAL_UINT8(Err::I2C_ERROR, st.code);
+  TEST_ASSERT_EQUAL_INT32(2, st.detail);
+  TEST_ASSERT_TRUE(dev.hardwareStateUncertain());
+  TEST_ASSERT_FALSE(dev.getSettings().cachedWiperKnown);
+  TEST_ASSERT_EQUAL_UINT32(1, Wire.endTransmissionCalls());
+}
+
 int main() {
   UNITY_BEGIN();
+
+  RUN_TEST(test_startup_orders_from_current_and_requested_connections);
+  RUN_TEST(test_failed_begin_baseline_paths_clear_runtime_state);
+  RUN_TEST(test_poll_without_a_started_job_is_invalid);
+  RUN_TEST(test_job_busy_offline_and_end_guards_are_bus_silent);
+  RUN_TEST(test_job_failures_stop_at_each_instruction);
+  RUN_TEST(test_step_chunk_boundaries_and_variant_saturation);
+  RUN_TEST(test_seven_bit_wiper_job_rejects_out_of_range_without_io);
+  RUN_TEST(test_local_callback_errors_preserve_health_and_certainty);
+  RUN_TEST(test_wire_random_read_uses_repeated_start_and_distinct_addresses);
+  RUN_TEST(test_esp32_wire_ambiguous_nack_preserves_uncertainty);
 
   RUN_TEST(test_status_ok_and_error);
   RUN_TEST(test_command_constants);

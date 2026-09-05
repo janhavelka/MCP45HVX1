@@ -21,12 +21,6 @@ static constexpr uint8_t MIN_ADDRESS = 0x3C;
 /// Maximum documented 7-bit I2C address.
 static constexpr uint8_t MAX_ADDRESS = 0x3F;
 
-/// Alternate range called out in extracted markdown as a figure/OCR conflict.
-/// The Rev B PDF text and Table 6-2 show 0x3C-0x3F; this range is accepted only
-/// to let hardware-verification builds override the address without patching.
-static constexpr uint8_t ALT_MIN_ADDRESS = 0x5C;
-static constexpr uint8_t ALT_MAX_ADDRESS = 0x5F;
-
 /// General Call address.
 static constexpr uint8_t GENERAL_CALL_ADDRESS = 0x00;
 

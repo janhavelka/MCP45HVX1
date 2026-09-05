@@ -155,7 +155,6 @@ failures the driver latches OFFLINE and refuses bus-touching calls until
 | `i2cTimeoutMs` | `50` | Timeout handed to the transport callbacks |
 | `resolution` | `Bits8` | `Bits8` for MCP45HV51, `Bits7` for MCP45HV31 |
 | `resistance` | `R10K` | Nominal RAB option, used only for helper math |
-| `allowAlternateAddressRange` | `false` | Legacy opt-in for `0x5C-0x5F`, which is **not** an MCP45HVX1 range; scheduled for removal |
 | `allowGeneralCall` | `false` | Opt-in for broadcast General Call helpers |
 | `writeInitialWiper` / `initialWiperCode` | `false` / `0x7F` | Optional output-changing startup wiper write |
 | `writeInitialTcon` / `initialTcon` | `false` / `0xFF` | Optional output-changing startup TCON write |

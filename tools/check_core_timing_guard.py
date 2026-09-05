@@ -6,6 +6,8 @@ import re
 import sys
 from typing import Dict
 
+from contract_common import strip_non_code
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCAN_DIRS = ("src", "include")
 VALID_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
@@ -30,18 +32,6 @@ FORBIDDEN_CORE_TOKENS = {
     "String": re.compile(r"\bString\b"),
     "HardwareSerial": re.compile(r"\bHardwareSerial\b"),
 }
-BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
-LINE_COMMENT_RE = re.compile(r"//[^\n]*")
-STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
-
-ALLOWED_CALL_COUNTS: Dict[str, Dict[str, int]] = {}
-ALLOWED_INCLUDE_COUNTS: Dict[str, int] = {}
-
-
-def strip_non_code(text: str) -> str:
-    text = BLOCK_COMMENT_RE.sub("", text)
-    text = LINE_COMMENT_RE.sub("", text)
-    return STRING_RE.sub('""', text)
 
 
 def collect_sources() -> list[pathlib.Path]:
@@ -93,42 +83,10 @@ def main() -> int:
     errors: list[str] = []
 
     for rel, counts in observed_calls.items():
-        if rel not in ALLOWED_CALL_COUNTS:
-            errors.append(f"forbidden timing calls in unexpected file: {rel} -> {counts}")
-            continue
-        expected = ALLOWED_CALL_COUNTS[rel]
-        for call_name, count in counts.items():
-            exp = expected.get(call_name, 0)
-            if count != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={count}, expected={exp}"
-                )
-
-    for rel, expected in ALLOWED_CALL_COUNTS.items():
-        observed = observed_calls.get(rel, {})
-        for call_name, exp in expected.items():
-            obs = observed.get(call_name, 0)
-            if obs != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={obs}, expected={exp}"
-                )
-        unexpected_calls = set(observed.keys()) - set(expected.keys())
-        if unexpected_calls:
-            errors.append(f"unexpected timing call types in {rel}: {sorted(unexpected_calls)}")
+        errors.append(f"timing calls forbidden in core file {rel}: {counts}")
 
     for rel, count in observed_includes.items():
-        exp = ALLOWED_INCLUDE_COUNTS.get(rel, 0)
-        if count != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={count}, expected={exp}"
-            )
-
-    for rel, exp in ALLOWED_INCLUDE_COUNTS.items():
-        obs = observed_includes.get(rel, 0)
-        if obs != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={obs}, expected={exp}"
-            )
+        errors.append(f"framework include forbidden in core file {rel}: observed={count}")
 
     for rel, count in observed_wire_includes.items():
         if count != 0:

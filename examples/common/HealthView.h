@@ -80,6 +80,8 @@ inline const char* errName(MCP45HVX1::Err code) {
       return "REGISTER_MISMATCH";
     case MCP45HVX1::Err::BUSY:
       return "BUSY";
+    case MCP45HVX1::Err::OFFLINE:
+      return "OFFLINE";
     case MCP45HVX1::Err::UNSUPPORTED:
       return "UNSUPPORTED";
     default:

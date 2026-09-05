@@ -152,6 +152,23 @@ class RaisingSerial:
 
 
 class HilParserTests(unittest.TestCase):
+    def test_address_command_accepts_only_datasheet_addresses(self) -> None:
+        for address in range(128):
+            with self.subTest(address=address):
+                if 0x3C <= address <= 0x3F:
+                    self.assertEqual(hil.address_command(address), f"addr 0x{address:02X}")
+                else:
+                    with self.assertRaises(ValueError):
+                        hil.address_command(address)
+
+    def test_detailed_help_usage_is_not_a_failure(self) -> None:
+        for command in ("help", "?", "help wiper", "? health", "help gc", "  help gc  "):
+            with self.subTest(command=command):
+                self.assertFalse(hil.command_failed(command, "Usage: gc arm\n> "))
+                self.assertTrue(hil.command_failed(command, "[E] timeout\nUsage: gc arm\n> "))
+        self.assertTrue(hil.command_failed("wiper extra", "Usage: wiper <code>\n> "))
+        self.assertTrue(hil.command_failed("", "Usage: help\n> "))
+
     def test_command_failed_detects_common_failure_tokens(self) -> None:
         self.assertTrue(hil.command_failed("probe", "[FAIL] probe\n"))
         self.assertTrue(hil.command_failed("probe", "[E] timeout\n"))

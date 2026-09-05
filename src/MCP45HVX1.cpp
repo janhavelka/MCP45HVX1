@@ -80,8 +80,7 @@ Status MCP45HVX1::begin(const Config& config) {
   if (config.i2cTimeoutMs == 0) {
     return Status::Error(Err::INVALID_CONFIG, "I2C timeout must be > 0");
   }
-  if (!_isValidAddress(config.i2cAddress) ||
-      (_isAlternateAddress(config.i2cAddress) && !config.allowAlternateAddressRange)) {
+  if (!_isValidAddress(config.i2cAddress)) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address");
   }
   if (config.resolution != Resolution::Bits7 && config.resolution != Resolution::Bits8) {
@@ -128,8 +127,16 @@ Status MCP45HVX1::begin(const Config& config) {
   _initialized = true;
   _driverState = DriverState::READY;
 
-  if (_config.writeInitialTcon) {
-    st = writeTcon(_config.initialTcon);
+  // Compare the requested topology with the baseline. Merely testing whether
+  // the target is a partial TCON misses reconnects such as 0xFD -> 0xFB.
+  // Shutdown overrides the terminal switches and is applied before moving the
+  // wiper; leaving shutdown or adding any connection waits for the new code.
+  const uint8_t initialTcon = sanitizeTcon(_config.initialTcon);
+  const bool tconFirst = (initialTcon & cmd::TCON_R0HW) == 0 ||
+      ((tcon & cmd::TCON_R0HW) != 0 &&
+       (initialTcon & static_cast<uint8_t>(~tcon) & cmd::TCON_TERMINAL_MASK) == 0);
+  if (_config.writeInitialTcon && tconFirst) {
+    st = writeTcon(initialTcon);
     if (!st.ok()) {
       return st;
     }
@@ -137,6 +144,13 @@ Status MCP45HVX1::begin(const Config& config) {
 
   if (_config.writeInitialWiper) {
     st = writeWiper(_config.initialWiperCode);
+    if (!st.ok()) {
+      return st;
+    }
+  }
+
+  if (_config.writeInitialTcon && !tconFirst) {
+    st = writeTcon(initialTcon);
     if (!st.ok()) {
       return st;
     }
@@ -235,6 +249,9 @@ Status MCP45HVX1::startRecoverJob() {
 Status MCP45HVX1::pollJob(uint32_t nowMs, uint8_t maxInstructions) {
   (void)nowMs;
 
+  if (_job.snapshot.type == JobType::None) {
+    return Status::Error(Err::INVALID_PARAM, "No active job");
+  }
   if (!_job.snapshot.active) {
     return _job.snapshot.status;
   }
@@ -306,7 +323,6 @@ DeviceInfo MCP45HVX1::getDeviceInfo() const {
   info.nominalResistanceOhms = nominalResistanceOhms(_config.resistance);
   info.nominalStepOhms = stepResistanceOhms(_config.resistance, _config.resolution);
   info.maxTerminalCurrentMilliAmps = maxTerminalCurrentMilliAmps(_config.resistance);
-  info.usingAlternateAddressRange = _isAlternateAddress(_config.i2cAddress);
   return info;
 }
 
@@ -1008,9 +1024,6 @@ Status MCP45HVX1::_i2cWriteTracked(uint8_t addr, const uint8_t* buf, size_t len)
   }
 
   Status st = _i2cWriteRaw(addr, buf, len);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   return _updateHealth(st);
 }
 
@@ -1019,10 +1032,6 @@ Status MCP45HVX1::_busResetTracked() {
     return Status::Error(Err::UNSUPPORTED, "I2C bus reset callback not configured");
   }
   Status st = _config.busReset(_config.controlUser);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
-      st.code == Err::UNSUPPORTED) {
-    return st;
-  }
   if (!st.ok()) {
     return _updateHealth(st);
   }
@@ -1067,9 +1076,6 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
   const uint8_t command = cmd::makeCommand(reg, cmd::Command::ReadData);
   uint8_t rx[cmd::READ_RESPONSE_LEN] = {};
   Status st = _i2cWriteReadRaw(_config.i2cAddress, &command, 1, rx, sizeof(rx));
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   if (!st.ok()) {
     return _updateHealth(st);
   }
@@ -1095,9 +1101,6 @@ Status MCP45HVX1::_readRegisterTracked(uint8_t reg, uint8_t& value) {
 Status MCP45HVX1::_readLastAddressTracked(uint8_t& value) {
   uint8_t rx[cmd::READ_RESPONSE_LEN] = {};
   Status st = _i2cWriteReadRaw(_config.i2cAddress, nullptr, 0, rx, sizeof(rx));
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   if (!st.ok()) {
     return _updateHealth(st);
   }
@@ -1196,7 +1199,7 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
     return Status::Error(Err::INVALID_PARAM, "General Call payload too long");
   }
   // The configuration gate is checked before the OFFLINE gate: a disabled
-  // General Call stays disabled after recover(), so reporting BUSY would
+  // General Call stays disabled after recover(), so reporting OFFLINE would
   // suggest a retry that can never succeed.
   if (!_config.allowGeneralCall) {
     return Status::Error(Err::UNSUPPORTED,
@@ -1211,9 +1214,6 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
     payload[1] = data[0];
   }
   Status st = _i2cWriteRaw(cmd::GENERAL_CALL_ADDRESS, payload, len + 1);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   if (!st.ok()) {
     return _updateHealth(st);
   }
@@ -1227,15 +1227,7 @@ Status MCP45HVX1::_generalCallWrite(uint8_t commandByte, const uint8_t* data, si
 // ===========================================================================
 
 bool MCP45HVX1::_isValidAddress(uint8_t address) {
-  return _isPrimaryAddress(address) || _isAlternateAddress(address);
-}
-
-bool MCP45HVX1::_isPrimaryAddress(uint8_t address) {
   return address >= cmd::MIN_ADDRESS && address <= cmd::MAX_ADDRESS;
-}
-
-bool MCP45HVX1::_isAlternateAddress(uint8_t address) {
-  return address >= cmd::ALT_MIN_ADDRESS && address <= cmd::ALT_MAX_ADDRESS;
 }
 
 bool MCP45HVX1::_isValidResistanceOption(ResistanceOption option) {
@@ -1363,6 +1355,7 @@ bool MCP45HVX1::_isAmbiguousStateWriteFailure(const Status& st) {
     case Err::NOT_INITIALIZED:
     case Err::UNSUPPORTED:
     case Err::BUSY:
+    case Err::OFFLINE:
     case Err::DEVICE_NOT_FOUND:
     case Err::REGISTER_MISMATCH:
     case Err::I2C_NACK_ADDR:
@@ -1416,7 +1409,7 @@ void MCP45HVX1::_clearHardwareStateUncertainty() {
 // ===========================================================================
 
 Status MCP45HVX1::_offlineStatus() const {
-  return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  return Status::Error(Err::OFFLINE, "Driver is offline; call recover()");
 }
 
 void MCP45HVX1::_reassertOfflineLatch() {
@@ -1435,13 +1428,9 @@ Status MCP45HVX1::_updateHealth(const Status& st) {
     return st;
   }
 
-  const uint32_t now = _nowMs();
-  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
-  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
-
   if (st.ok()) {
-    _lastOkMs = now;
-    if (_totalSuccess < maxU32) {
+    _lastOkMs = _nowMs();
+    if (_totalSuccess < std::numeric_limits<uint32_t>::max()) {
       _totalSuccess++;
     }
     _consecutiveFailures = 0;
@@ -1449,26 +1438,11 @@ Status MCP45HVX1::_updateHealth(const Status& st) {
     return st;
   }
 
-  _lastError = st;
-  _lastErrorMs = now;
-  if (_totalFailures < maxU32) {
-    _totalFailures++;
-  }
-  if (_consecutiveFailures < maxU8) {
-    _consecutiveFailures++;
-  }
-
-  if (_consecutiveFailures >= _config.offlineThreshold) {
-    _driverState = DriverState::OFFLINE;
-  } else {
-    _driverState = DriverState::DEGRADED;
-  }
-
-  return st;
+  return _recordFailure(st);
 }
 
 Status MCP45HVX1::_recordFailure(const Status& st) {
-  if (st.ok() || st.inProgress()) {
+  if (!_initialized || st.ok() || st.inProgress()) {
     return st;
   }
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||

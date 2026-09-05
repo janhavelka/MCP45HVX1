@@ -1,5 +1,11 @@
 # MCP45HVX1 Code Audit
 
+> Historical audit snapshot, reviewed against commit `1faad98` on 2026-09-05.
+> Its Open/Closed labels and statements about uncommitted changes describe
+> that earlier investigation. The completed verification, corrections to this
+> report, implemented fixes, and remaining hardware evidence requirements are
+> in [`CODE_AUDIT_RESOLUTION.md`](CODE_AUDIT_RESOLUTION.md).
+
 Findings from a full review of the library against DS20005304B (Rev B) and
 DS80000649B (Rev B, 7/2015), plus the examples, tests, and repository tooling.
 

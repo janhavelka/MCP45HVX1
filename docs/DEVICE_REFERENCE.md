@@ -56,10 +56,9 @@ the shifted control-byte column. As a 7-bit address `0x5C` is `0b1011100`,
 whose fixed bits `10111` match neither `01111` (high-voltage) nor any `0101x`
 (standard-voltage) form — it addresses no device in either family.
 
-`Config::allowAlternateAddressRange` still accepts the range so an existing
-hardware-verification build keeps working, but it is not supported by the
-datasheet and is scheduled for removal — see finding 2 in
-[`CODE_AUDIT.md`](CODE_AUDIT.md).
+The driver and both CLIs accept only `0x3C..0x3F`. The former alternate-address
+configuration field, diagnostic field, constants, and CLI command have been
+removed.
 
 A1/A0 are Schmitt-trigger inputs with no documented internal pull resistors and
 must be tied statically high or low (§6.1.3). SDA is open-drain and needs an
@@ -240,10 +239,41 @@ Terminal / wiper current `IT`, `IW` (DC characteristics), which is what
 36 mA applies only when the current path is the analog switch alone
 (`IBW` at zero scale, `IAW` at full scale).
 
-Table 5-3 gives a minimum safe wiper code at `VBW` = 36 V, below which `IW`
-exceeds specification: 5 k and 10 k → `N` ≥ 91 (8-bit) / 45 (7-bit); 50 k →
-35 / 17; 100 k → 17 / 8. The driver does not enforce this; a rheostat
-application near 36 V must clamp the code itself.
+Table 5-3 prints minimum codes at `VBW` = 36 V of 91/45 (5 k and 10 k),
+35/17 (50 k), and 17/8 (100 k), in 8-bit/7-bit order. Those integers are
+**rounded down**, despite Note 3 saying they are rounded up. Do not treat
+them as a guaranteed current bound.
+
+For the table's simplified B-W rheostat model (`RW = RFS = RZS = 0`), a
+conservative calculation uses minimum resistance, current in **amperes**, and
+rounds **up**:
+
+```text
+RS_min = 0.8 * RAB_nominal / maxCode
+Imax_A = maxTerminalCurrentMilliAmps / 1000
+N_min = ceil(abs(VBW) / (Imax_A * RS_min))
+```
+
+At 36 V this gives:
+
+| RAB | 8-bit `N_min` | 7-bit `N_min` |
+|---|---:|---:|
+| 5 k | 92 | 46 |
+| 10 k | 92 | 46 |
+| 50 k | 36 | 18 |
+| 100 k | 18 | 9 |
+
+For example, the table's 5 k / 8-bit code 91 gives about 25.22 mA at minimum
+RAB, exceeding 25 mA; code 92 gives about 24.95 mA. A result above `maxCode`
+means there is no allowable code in this model; clamping it to `maxCode`
+would conceal that failure. An A-W rheostat instead needs an upper code
+bound. Zero-scale switch current, actual voltage, transient response, and
+package thermal limits need separate assessment.
+
+The library deliberately provides no `minSafeWiperCode()` guarantee: it has
+no measured voltage, load, or thermal input, and the diagnostic CLI cannot
+assume a 36 V rheostat. Applications must enforce their measured circuit's
+limits and verify them externally.
 
 Rails: `VL` 1.8-5.5 V; `V+ − V−` recommended operating span 10-36 V, never
 above 36 V; `VL − V−` must not exceed 5.5 V; DGND and all terminal voltages

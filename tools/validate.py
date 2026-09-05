@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,7 @@ def main() -> int:
     run([python, "tools/check_core_timing_guard.py"])
     run([python, "tools/check_generated_artifacts.py"])
     run([python, "tools/test_run_hil_mcp45hvx1_parser.py"])
+    run([python, "tools/test_contract_tools.py"])
     run([python, "tools/run_hil_mcp45hvx1.py", "--parser-self-test"])
     run([python, "scripts/generate_version.py", "check"])
     obj = os.devnull
@@ -55,6 +57,14 @@ def main() -> int:
             "-I.", "-Iinclude", "-Iexamples", "-Itest/stubs", "-c",
             "examples/01_basic_bringup_cli/main.cpp", "-o", obj
         ])
+        with tempfile.TemporaryDirectory(prefix="mcp45hvx1-cli-") as tmp:
+            cli_test = str(Path(tmp) / ("cli-test.exe" if os.name == "nt" else "cli-test"))
+            run([
+                "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror=return-type",
+                "-I.", "-Iinclude", "-Iexamples", "-Itest/stubs",
+                "tests/test_arduino_cli.cpp", "src/MCP45HVX1.cpp", "-o", cli_test,
+            ])
+            run([cli_test])
     else:
         print("SKIP: g++ not found")
 

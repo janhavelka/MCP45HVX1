@@ -18,7 +18,12 @@ public:
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
   uint32_t getTimeOut() const { return _timeoutMs; }
 
-  void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; _overflow = false; }
+  void beginTransmission(uint8_t addr) {
+    _addr = addr;
+    _txLen = 0;
+    _overflow = false;
+    ++_beginTransmissionCalls;
+  }
   size_t write(uint8_t data) {
     if (_txLen >= sizeof(_txBuf)) {
       _overflow = true;
@@ -39,23 +44,28 @@ public:
     return written;
   }
   uint8_t endTransmission(bool stop = true) {
-    (void)stop;
+    _lastStop = stop;
+    ++_endTransmissionCalls;
     // Real Wire reports 1 ("data too long to fit in transmit buffer").
-    return _overflow ? 1 : _endTransmissionResult;
+    const uint8_t result = _overflow ? 1 : _endTransmissionResult;
+    _repeatedStartPending = !stop && result == 0;
+    return result;
   }
 
   size_t requestFrom(uint8_t addr, size_t len) {
-    (void)addr;
-    if (_requestFromOverrideEnabled) {
+    _readAddr = addr;
+    ++_requestFromCalls;
+    _lastReadRepeatedStart = _repeatedStartPending;
+    _repeatedStartPending = false;
+    _rxLen = len < _stagedRxLen ? len : _stagedRxLen;
+    if (_requestFromOverrideEnabled && _requestFromOverride < _rxLen) {
       _rxLen = _requestFromOverride;
-    } else {
-      _rxLen = len;
     }
     _rxIdx = 0;
     return _rxLen;
   }
 
-  int available() { return _rxLen - _rxIdx; }
+  int available() { return static_cast<int>(_rxLen - _rxIdx); }
   int read() {
     if (_rxIdx < _rxLen) {
       return _rxBuf[_rxIdx++];
@@ -65,7 +75,10 @@ public:
 
   // Test helper: set data to return on next read
   void _setReadData(const uint8_t* data, size_t len) {
-    for (size_t i = 0; i < len && i < sizeof(_rxBuf); i++) {
+    _stagedRxLen = len < sizeof(_rxBuf) ? len : sizeof(_rxBuf);
+    _rxLen = 0;
+    _rxIdx = 0;
+    for (size_t i = 0; i < _stagedRxLen; i++) {
       _rxBuf[i] = data[i];
     }
   }
@@ -78,15 +91,30 @@ public:
   }
   void _clearRequestFromOverride() { _requestFromOverrideEnabled = false; }
   bool _overflowed() const { return _overflow; }
+  bool lastStop() const { return _lastStop; }
+  bool lastReadRepeatedStart() const { return _lastReadRepeatedStart; }
+  uint8_t lastWriteAddress() const { return _addr; }
+  uint8_t lastReadAddress() const { return _readAddr; }
+  uint32_t beginTransmissionCalls() const { return _beginTransmissionCalls; }
+  uint32_t endTransmissionCalls() const { return _endTransmissionCalls; }
+  uint32_t requestFromCalls() const { return _requestFromCalls; }
 
   void end() {}
 
 private:
   uint8_t _addr = 0;
+  uint8_t _readAddr = 0;
+  bool _lastStop = true;
+  bool _repeatedStartPending = false;
+  bool _lastReadRepeatedStart = false;
+  uint32_t _beginTransmissionCalls = 0;
+  uint32_t _endTransmissionCalls = 0;
+  uint32_t _requestFromCalls = 0;
   uint8_t _txBuf[I2C_BUFFER_LENGTH] = {};
   size_t _txLen = 0;
   uint8_t _rxBuf[I2C_BUFFER_LENGTH] = {};
   size_t _rxLen = 0;
+  size_t _stagedRxLen = 0;
   size_t _rxIdx = 0;
   uint32_t _timeoutMs = 0;
   uint8_t _endTransmissionResult = 0;

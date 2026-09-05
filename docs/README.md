@@ -17,7 +17,8 @@ evidence-gated.
 | [`MCP45HVX1_HARDWARE_VALIDATION.md`](MCP45HVX1_HARDWARE_VALIDATION.md) | Hardware/HIL evidence procedure for address straps, POR/BOR, analog output, SHDN/WLAT, safe loads, and General Call isolation. |
 | [`MCP45HVX1_RELEASE_CHECKLIST.md`](MCP45HVX1_RELEASE_CHECKLIST.md) | Release gates for repository state, versioning, checks, packaging, CI, hardware evidence, and signoff. |
 | [`IDF_PORT.md`](IDF_PORT.md) | ESP-IDF component/example boundary, command parity, and build evidence rules. |
-| [`CODE_AUDIT.md`](CODE_AUDIT.md) | Findings from the datasheet/code audit, each independently re-verified against the tree, with a proposal and an Open/Closed status. Maintainer document; excluded from package exports. |
+| [`CODE_AUDIT.md`](CODE_AUDIT.md) | Historical audit input; its statuses are superseded by the resolution report. Maintainer document; excluded from package exports. |
+| [`CODE_AUDIT_RESOLUTION.md`](CODE_AUDIT_RESOLUTION.md) | Verification of all 17 findings, implemented fixes, rejected proposals, migration, and validation evidence. Maintainer document; excluded from package exports. |
 
 Repository-wide user and release information lives in
 [`../README.md`](../README.md), [`../CHANGELOG.md`](../CHANGELOG.md), and

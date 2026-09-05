@@ -7,6 +7,7 @@
 namespace MCP45HVX1 {
 
 /// Error codes for all MCP45HVX1 operations.
+/// Append new codes to preserve the numeric values of existing codes.
 enum class Err : uint8_t {
   OK = 0,                    ///< Operation successful
   NOT_INITIALIZED,           ///< begin() not called
@@ -16,15 +17,17 @@ enum class Err : uint8_t {
   INVALID_PARAM,             ///< Invalid parameter value
   DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
   REGISTER_MISMATCH,         ///< Register value does not match expected device behavior
-  BUSY,                      ///< Device is busy
+  BUSY,                      ///< A poll job is active; finish it before starting another operation
   IN_PROGRESS,               ///< Poll-chunked operation remains active; call pollJob() again
   UNSUPPORTED,               ///< Operation is not supported by documented registers
 
-  // I2C transport details (append-only to preserve existing values)
+  // I2C transport details
   I2C_NACK_ADDR,             ///< I2C address not acknowledged
   I2C_NACK_DATA,             ///< I2C data byte not acknowledged
   I2C_TIMEOUT,               ///< I2C transaction timeout
-  I2C_BUS                    ///< I2C bus error (arbitration lost, etc.)
+  I2C_BUS,                   ///< I2C bus error (arbitration lost, etc.)
+
+  OFFLINE                    ///< Failure threshold latched; explicit recovery is required
 };
 
 /// Status structure returned by all fallible operations.

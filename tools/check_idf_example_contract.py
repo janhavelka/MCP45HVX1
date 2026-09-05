@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import pathlib
 import re
-import runpy
 import sys
+
+from contract_common import (
+    IDF_REQUIRED_COMPONENTS, MANDATORY_COMMANDS, check_argument_contract, command_help_names,
+    function_body, parse_command_help_specs, strip_non_code,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -44,6 +48,13 @@ REQUIRED_NATIVE_TOKENS = [
     "vTaskDelay",
     "fgets",
     "i2c_new_master_bus",
+    "uart_driver_install",
+    "uart_vfs_dev_use_driver",
+    "usb_serial_jtag_driver_install",
+    "usb_serial_jtag_vfs_use_driver",
+    "pollConsole",
+    "O_NONBLOCK",
+    "clearerr(stdin)",
 ]
 
 CI_REQUIRED_TOKENS = [
@@ -70,7 +81,6 @@ IDF_COMMAND_ACTIONS = {
     "color": "styleSetEnabled",
     "begin": "beginDriver",
     "addr": "parsePrimaryAddressArg",
-    "addr_alt": "parseAlternateAddressArg",
     "variant": "parseResolutionText",
     "rab": "parseResistance",
     "probe": "gDev.probe",
@@ -123,42 +133,16 @@ def fail(msg: str) -> None:
     raise SystemExit(1)
 
 
-def strip_comments_and_strings(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    text = re.sub(r"//.*", "", text)
-    text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
-    text = re.sub(r"'(?:\\.|[^'\\])*'", "''", text)
-    return text
-
-
 def require_token(text: str, token: str, label: str) -> None:
     if token not in text:
         fail(f"{label} missing token '{token}'")
 
 
-def help_commands_from_idf_print_help(text: str) -> set[str]:
-    match = re.search(r"void\s+printHelp\s*\(\s*\)\s*\{(?P<body>.*?)\n\}", text, re.DOTALL)
-    if match is None:
-        fail("ESP-IDF printHelp() body missing")
-    commands: set[str] = set()
-    for spec in re.findall(r'puts\s*\(\s*"  ([^"]+)"\s*\)', match.group("body")):
-        for part in re.split(r"\s+(?:/|\|)\s+", spec):
-            token = part.strip().split()[0] if part.strip() else ""
-            token = token.strip("[]")
-            if token:
-                commands.add(token)
-    return commands
-
-
 def main() -> int:
-    ns = runpy.run_path(str(ROOT / "tools" / "check_cli_contract.py"))
-    commands = ns.get("MANDATORY_COMMANDS", [])
-    components = ns.get("IDF_REQUIRED_COMPONENTS", [])
-    parse_help_specs = ns["parse_command_help_specs"]
-    help_names = ns["command_help_names"]
     main_path = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     text = main_path.read_text(encoding="utf-8", errors="replace")
+    check_argument_contract(text, "ESP-IDF CLI", "cmd", "parseTerminalMode")
     arduino_text = (
         ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
     ).read_text(encoding="utf-8", errors="replace")
@@ -188,8 +172,8 @@ def main() -> int:
 
     if FORBIDDEN_INCLUDE_RE.search(text):
         fail("forbidden Arduino/Wire include in IDF example")
-    code_only = strip_comments_and_strings(text)
-    cmake_code_only = strip_comments_and_strings(cmake)
+    code_only = strip_non_code(text)
+    cmake_code_only = strip_non_code(cmake)
     for token in FORBIDDEN_TOKENS:
         if re.search(rf"\b{re.escape(token)}\b", code_only):
             fail(f"forbidden Arduino compatibility token in IDF example: {token}")
@@ -203,10 +187,10 @@ def main() -> int:
     dispatch = set(
         re.findall(r'strcmp\s*\(\s*cmd\s*,\s*"([^"]+)"\s*\)\s*==\s*0', text)
     )
-    arduino_help = parse_help_specs(arduino_text, "Arduino CLI")
-    idf_help = parse_help_specs(text, "ESP-IDF CLI")
-    idf_help_names = help_names(idf_help)
-    for cmd in commands:
+    arduino_help = parse_command_help_specs(arduino_text, "Arduino CLI")
+    idf_help = parse_command_help_specs(text, "ESP-IDF CLI")
+    idf_help_names = command_help_names(idf_help)
+    for cmd in MANDATORY_COMMANDS:
         if cmd == "?":
             if "?" not in dispatch:
                 fail("mandatory command '?' missing from IDF example")
@@ -240,7 +224,7 @@ def main() -> int:
         "No help for",
     ):
         require_token(text, token, "ESP-IDF detailed help")
-    for component in components:
+    for component in IDF_REQUIRED_COMPONENTS:
         if re.search(rf"\b{re.escape(component)}\b", cmake) is None:
             fail(f"ESP-IDF CMake file missing component '{component}'")
 
@@ -248,9 +232,7 @@ def main() -> int:
         "parseU32Bounded",
         "parseU8Bounded",
         "parseFloatRangeArg",
-        "parseAnySupportedAddressArg",
         "parsePrimaryAddressArg",
-        "parseAlternateAddressArg",
         "parseWiperCodeArg",
         "parseTconArg",
         "parseRegisterArg",
@@ -265,13 +247,13 @@ def main() -> int:
         "*text == '+'",
     ):
         require_token(text, token, "bounded IDF parsing")
-    handler = code_only[code_only.index("void handleCommand") :]
+    handler = strip_non_code(function_body(text, "handleCommand", "ESP-IDF CLI"))
     if re.search(r"\bparseU32\s*\(", handler):
         fail("IDF command handler must not use unbounded parseU32()")
     if RISKY_NARROW_CAST_RE.search(handler):
         fail("IDF command handler contains risky static_cast<uint8_t> from parsed variable")
     for pat in (
-        r"is(?:Primary|Alternate)Address\s*\(\s*static_cast<uint8_t>",
+        r"isPrimaryAddress\s*\(\s*static_cast<uint8_t>",
         r"write(?:Wiper|Tcon|Register)\s*\(\s*static_cast<uint8_t>",
         r"(?:incrementWiper|decrementWiper)\s*\(\s*static_cast<uint8_t>",
         r"\(\s*uint8_t\s*\)\s*[A-Za-z_][A-Za-z0-9_]*",

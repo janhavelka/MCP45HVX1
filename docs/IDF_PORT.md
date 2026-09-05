@@ -13,6 +13,8 @@ The ESP-IDF example in `examples/espidf_basic` is a native IDF application:
 - timestamps use `esp_timer_get_time()` through `Config::nowMs`
 - delays use `vTaskDelay()`
 - command input uses fixed C buffers
+- console setup selects the configured UART, USB Serial/JTAG, or ROM USB CDC
+  VFS; unsupported consoles and initialization failures stop with a diagnostic
 
 The ESP-IDF example must not include Arduino sources or compatibility facades
 such as `Arduino.h`, `Wire.h`, `String`, `Serial`, `TwoWire`,
@@ -30,6 +32,8 @@ The native ESP-IDF CLI mirrors the Arduino diagnostic CLI behavior:
 - `help <command>` and `? <command>` show aliases, safety, syntax, and examples
   without executing the selected command
 - byte-sized and output-changing arguments use bounded parsers
+- no-argument commands reject trailing tokens, including `zero`, `mid`, and
+  `max`; long-form terminal-mode aliases agree between the examples
 - `color on|off` controls ANSI status/warning output
 - `selftest safe` remains read-only
 - `selftest output` is explicit, output-changing, verifies writes, restores
@@ -43,6 +47,21 @@ The native ESP-IDF CLI mirrors the Arduino diagnostic CLI behavior:
 The example sets `Config::allowGeneralCall = true` only for diagnostic CLI use.
 That is not production bus-manager policy; application firmware must make its
 own explicit General Call decision.
+
+Input polls are nonblocking and bounded. A fixed buffer assembles commands
+across polls and transient `EAGAIN`/`EWOULDBLOCK`/`EINTR` errors are cleared.
+CR, LF, and CRLF terminate commands; overlong lines and invalid control bytes
+are discarded through the terminator so a truncated output command cannot
+execute. A partial line or disconnected host does not hold the task inside a
+blocking line read. Physical console behavior still requires an ESP-IDF HIL
+session; build and host tests alone do not establish it.
+
+The adapter retains ESP-IDF error detail. Version 6.0.1 reports both address
+and data NACKs as `ESP_ERR_INVALID_RESPONSE`, and can return that same code
+after an internal transaction timeout. It therefore maps to `I2C_ERROR` even
+on receive-only calls. Explicit `ESP_ERR_TIMEOUT` maps to `I2C_TIMEOUT`;
+`ESP_ERR_INVALID_STATE` remains a bus/setup error. See the
+transport discussion in [`MCP45HVX1_API_CONTRACT.md`](MCP45HVX1_API_CONTRACT.md).
 
 ## Build Evidence
 

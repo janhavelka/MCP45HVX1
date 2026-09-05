@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import pathlib
 import re
-import runpy
 import sys
+
+import check_idf_example_contract
+from contract_common import (
+    IDF_REQUIRED_COMPONENTS, MANDATORY_COMMANDS, GENERAL_CALL_SUBCOMMANDS,
+    check_argument_contract, command_help_names, function_body, parse_command_help_specs,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -19,86 +24,11 @@ REQUIRED_COMMON = [
     "HealthView.h",
 ]
 
-MANDATORY_COMMANDS = [
-    "help",
-    "?",
-    "version",
-    "ver",
-    "scan",
-    "color",
-    "begin",
-    "addr",
-    "addr_alt",
-    "res",
-    "variant",
-    "rab",
-    "probe",
-    "recover",
-    "iface_reset",
-    "defaults",
-    "drv",
-    "cfg",
-    "settings",
-    "detail",
-    "health",
-    "state",
-    "info",
-    "errata",
-    "read",
-    "rregs",
-    "readwiper",
-    "readtcon",
-    "dump",
-    "raw",
-    "last",
-    "reg",
-    "rreg",
-    "wreg",
-    "wregs",
-    "wiper",
-    "frac",
-    "pos",
-    "zero",
-    "mid",
-    "max",
-    "inc",
-    "dec",
-    "tcon",
-    "term",
-    "terminal",
-    "shutdown",
-    "software-shutdown",
-    "mode",
-    "gc",
-    "selftest",
-    "verbose",
-    "stress",
-    "stress_mix",
-]
-GENERAL_CALL_SUBCOMMANDS = ["arm", "disarm", "wiper", "tcon", "inc", "dec"]
-GENERAL_CALL_IDF_TOKENS = [
-    "addr == 0x00U",
-    "transmitGeneralCall",
-    "I2C_DEVICE_ADDRESS_NOT_USED",
-    "addressByte = 0x00U",
-    "i2c_master_execute_defined_operations",
-]
-
-IDF_REQUIRED_COMPONENTS = [
-    "MCP45HVX1",
-    "esp_driver_i2c",
-    "esp_driver_gpio",
-    "esp_timer",
-    "freertos",
-    "vfs",
-]
-
 COMMAND_ACTIONS = {
     "scan": "i2c_scanner::scan",
     "color": "handleColor",
     "begin": "handleBegin",
     "addr": "handleAddress",
-    "addr_alt": "handleAlternateAddress",
     "variant": "handleResolution",
     "rab": "handleResistance",
     "probe": "gDev.probe",
@@ -155,15 +85,6 @@ COMMAND_DOCS = [
     "docs/MCP45HVX1_RELEASE_CHECKLIST.md",
 ]
 
-COMMAND_HELP_SPEC_RE = re.compile(
-    r'\{\s*"(?P<canonical>[^"]+)",\s*"(?P<aliases>[^"]*)",\s*'
-    r'"(?P<synopsis>[^"]+)",\s*"(?P<description>[^"]+)",\s*'
-    r'HelpSection::(?P<section>[A-Za-z]+),\s*'
-    r'HelpSafety::(?P<safety>[A-Za-z]+),\s*'
-    r'"(?P<syntax>[^"]+)",\s*"(?P<examples>[^"]+)"\s*\}',
-    re.DOTALL,
-)
-
 
 def fail(msg: str) -> None:
     print(f"CLI contract FAILED: {msg}")
@@ -196,32 +117,6 @@ def help_commands_from_specs(specs: list[str]) -> set[str]:
     return commands
 
 
-def parse_command_help_specs(text: str, label: str) -> list[dict[str, str]]:
-    match = re.search(
-        r"\bCOMMAND_HELP\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\s*\};",
-        text,
-        re.DOTALL,
-    )
-    if match is None:
-        fail(f"{label} missing static COMMAND_HELP table")
-    specs = [item.groupdict() for item in COMMAND_HELP_SPEC_RE.finditer(match.group("body"))]
-    if not specs:
-        fail(f"{label} COMMAND_HELP table is empty or unparsable")
-    return specs
-
-
-def command_help_names(specs: list[dict[str, str]]) -> set[str]:
-    names: set[str] = set()
-    for spec in specs:
-        for name in (spec["canonical"], *spec["aliases"].split()):
-            if not name:
-                continue
-            if name in names:
-                fail(f"duplicate detailed-help command/alias '{name}'")
-            names.add(name)
-    return names
-
-
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
@@ -243,6 +138,7 @@ def main() -> int:
         ensure_exists(common_dir / name, f"common helper {name}")
 
     text = bringup_main.read_text(encoding="utf-8", errors="replace")
+    check_argument_contract(text, "Arduino CLI", "command", "parseMode")
 
     help_specs = parse_command_help_specs(text, "Arduino CLI")
     detailed_help_names = command_help_names(help_specs)
@@ -308,13 +204,10 @@ def main() -> int:
     for token in ARDUINO_OUTPUT_WARNING_TOKENS:
         require_token(text, token, "Arduino CLI output-changing warning/danger guard")
 
-    general_call_body = text[text.find("void handleGeneralCall") :]
+    general_call_body = function_body(text, "handleGeneralCall", "Arduino CLI")
     for sub in ("arm", "disarm", "wiper", "tcon", "inc", "dec"):
         if f'"{sub}"' not in general_call_body:
             fail(f"General Call subcommand '{sub}' missing handler branch")
-
-    if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
-        fail("either 'cfg' or 'settings' command must be present")
 
     for subcommand in GENERAL_CALL_SUBCOMMANDS:
         help_re = re.compile(rf"\bgc\s+{re.escape(subcommand)}\b")
@@ -351,8 +244,9 @@ def main() -> int:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"ESP-IDF CMake file missing required component '{component}'")
 
-    idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
-    idf_contract["main"]()
+    idf_result = check_idf_example_contract.main()
+    if idf_result != 0:
+        return idf_result
 
     for rel in (
         "examples/01_basic_bringup_cli/main.cpp",

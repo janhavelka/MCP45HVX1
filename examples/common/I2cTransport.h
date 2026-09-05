@@ -47,7 +47,9 @@ inline MCP45HVX1::Status mapWireResult(uint8_t result, const char* context) {
     case 1:
       return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, context, result);
     case 2:
-      return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_NACK_ADDR, context, result);
+      // ESP32 Wire folds ESP_FAIL and ESP_ERR_NOT_FOUND into 2. ESP_FAIL
+      // includes data NACKs, so the address phase cannot be inferred here.
+      return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_ERROR, context, result);
     case 3:
       return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_NACK_DATA, context, result);
     case 4:
@@ -132,12 +134,8 @@ inline MCP45HVX1::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
   }
 
   const size_t read = wire->requestFrom(addr, static_cast<uint8_t>(rxLen));
-  if (read == 0) {
-    // No byte at all came back: the client did not acknowledge. Reporting this
-    // as a generic I2C error would make Err::DEVICE_NOT_FOUND unreachable from
-    // begin() and probe(), which is the primary bring-up diagnostic.
-    return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_NACK_ADDR, "I2C read not acknowledged");
-  }
+  // requestFrom exposes a byte count only. Zero can mean NACK, timeout, bus
+  // failure, or a local Wire failure; it is not proof of an address NACK.
   if (read != rxLen) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_ERROR, "I2C read length mismatch",
                                     static_cast<int32_t>(read));
@@ -206,7 +204,10 @@ inline MCP45HVX1::Status wireBusReset(void* user) {
   delayMicroseconds(5);
   pinMode(ctx->sda, INPUT_PULLUP);
 
-  Wire.begin(ctx->sda, ctx->scl);
+  if (!Wire.begin(ctx->sda, ctx->scl)) {
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_BUS,
+                                    "Wire bus reinitialization failed");
+  }
   Wire.setClock(ctx->frequencyHz);
   setWireTimeout(Wire, ctx->timeoutMs);
   return MCP45HVX1::Status::Ok();

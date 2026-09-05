@@ -140,8 +140,7 @@ Record each populated A1:A0 combination:
 `0x3C..0x3F` is the only documented range for this part (DS20005304B §6.2.4,
 Table 6-2). A device answering at `0x5C..0x5F` is not an MCP45HVX1 — see the
 addressing section of [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md). The
-`Config::allowAlternateAddressRange` opt-in is retained for compatibility only
-and is scheduled for removal; do not record evidence against it.
+driver rejects addresses outside `0x3C..0x3F`.
 
 ## POR/BOR Rail Cycling
 

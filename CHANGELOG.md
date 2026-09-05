@@ -2,8 +2,33 @@
 
 ## Unreleased
 
+Development metadata is now **2.0.0** for the source-incompatible removals
+below. No release or hardware qualification is implied. See
+[`docs/CODE_AUDIT_RESOLUTION.md`](docs/CODE_AUDIT_RESOLUTION.md) for the
+verification and disposition of all 17 audit findings.
+
 ### Fixed
 
+- Startup write ordering now considers the current and target TCON topology,
+  including partial reconnections and leaving software shutdown.
+- `pollJob()` reports `INVALID_PARAM` when no job has been started; completed
+  and zero-step job statuses remain available.
+- Both example transports preserve ambiguity instead of mislabeling framework
+  failures as definite address NACKs. ESP-IDF `INVALID_RESPONSE` and ESP32 Wire
+  result 2/zero-byte reads cannot reliably identify the failing phase.
+- Arduino baseline restore now reads and compares both registers, propagates
+  the first failure, and updates the CLI uncertainty flag from verification.
+- ESP-IDF console initialization and bounded input assembly handle fragmented
+  input, transient errors, CR/LF/CRLF, oversized lines, and disconnects.
+- Both CLIs reject malformed no-argument commands and overflowing tokens and
+  agree on terminal-mode aliases; invalid `begin` arguments cannot change config.
+  `mid` now selects the POR midpoint in both examples and both resolutions.
+- The Arduino bus-reset callback reports a failed bus reinitialization.
+- Contract guards propagate failures and correctly distinguish C++ comments
+  and literals. HIL detailed help no longer triggers a false `Usage:` failure.
+- Version-script imports are read-only; only CLI sync or SCons performs writes.
+- The device reference corrects Table 5-3 rounding and current units instead
+  of adding the audit's unsafe `minSafeWiperCode()` proposal.
 - `restorePowerOnDefaults()` now writes Wiper 0 before TCON0. The default TCON
   reconnects every terminal, so the previous order briefly connected the analog
   terminals while Wiper 0 still held the old code.
@@ -17,16 +42,15 @@
 - Arduino example: the `dirty=` field in `state` and the health summary
   repeated the `uncertain=` value instead of reporting the CLI's own
   output-changed flag, so the two columns were always identical.
-- Arduino example transport: a read that returns no bytes is now reported as
-  `I2C_NACK_ADDR`. On arduino-esp32 `endTransmission(false)` only marks the
-  transfer as repeated-start and the error surfaces inside `requestFrom()`,
-  which made `Err::DEVICE_NOT_FOUND` unreachable from `begin()` and `probe()`.
+- Arduino example transport retains repeated-start reads. A zero-byte read
+  reports `I2C_ERROR`, because `requestFrom()` loses the backend error detail;
+  the earlier audit's address-NACK interpretation was incorrect.
 - Arduino example transport: a short `Wire.write()` no longer returns with the
   transmission still open. `TwoWire::beginTransmission()` acquires the Wire
   mutex with `portMAX_DELAY` and only `endTransmission(true)` releases it, so
   the previous early return leaked that mutex and would deadlock the next I2C
-  transaction. Sending the truncated frame is safe on this device: a Stop
-  before the data ACK aborts the write and stores nothing (DS20005304B §7.4.1).
+  transaction. A truncated multi-command frame can already have changed the
+  wiper, so the adapter reports an ambiguous error and the driver marks uncertainty.
 - Arduino example transport: `Config::i2cTimeoutMs` is clamped to the
   `uint16_t` that `TwoWire::setTimeOut()` accepts instead of silently wrapping.
 - Arduino example transport: `initWire()` reports the real `Wire.begin()`
@@ -58,18 +82,28 @@
 
 ### Added
 
+- `Err::OFFLINE` (appended as value 15) distinguishes a recovery-required latch
+  from `BUSY`, which now denotes an active job.
+- Ten native regression groups expand the core suite to 88 cases, plus host
+  tests of actual CLI restore/input code and tooling mutation tests.
+- A strict public-API Doxygen gate, documented generated macros and snapshot
+  fields, and checksum-pinned Doxygen 1.15.0 CI. The full manual scans `src`
+  and new docs automatically.
 - `static_assert` in the Arduino example transport that the Wire buffer can
   carry a full `cmd::MAX_COMMAND_CHUNK` INC/DEC burst, and derivation of the
   transport's buffer limit from the platform's own `I2C_BUFFER_LENGTH`.
 - Native tests for the wiper-before-TCON restore order, zero-step job
   snapshots, General Call gating while OFFLINE, all five `TerminalMode` presets
   and all three terminals, a full-chunk transport write, and unacknowledged
-  reads. 78 tests total.
+  reads; these were the initial 78-test baseline for the follow-up review.
 - `Err` status-code table in the API contract; `Err::IN_PROGRESS` was
   previously documented nowhere.
 
 ### Changed
 
+- Failure accounting has one owner; local callback errors leave device health
+  unchanged. The documented 64-byte command bound remains sufficient for both
+  supplied transports.
 - `docs/DEVICE_REFERENCE.md` rewritten against DS20005304B with section and
   table citations, replacing statements attributed to a deleted intermediate
   text extraction. It now records that `0x5C-0x5F` belongs to the
@@ -120,6 +154,10 @@
 
 ### Removed
 
+- The unsupported alternate-address API: `allowAlternateAddressRange`,
+  `usingAlternateAddressRange`, `ALT_MIN_ADDRESS`, `ALT_MAX_ADDRESS`, and the
+  `addr_alt` CLI command. Only `0x3C..0x3F` is accepted; rebuild dependent code
+  and remove uses of the deleted fields and command.
 - The three committed HIL session reports under `docs/reports/`. They recorded
   one developer's COM8/COM9 ESP32-S2 bench sessions and referenced a
   `raw_serial.txt` bundle that was never committed; the durable results are now

@@ -10,9 +10,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
 
+#include <sdkconfig.h>
 #include <driver/gpio.h>
 #include <driver/i2c_master.h>
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
+#include <driver/uart.h>
+#include <driver/uart_vfs.h>
+#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include <driver/usb_serial_jtag.h>
+#include <driver/usb_serial_jtag_vfs.h>
+#elif CONFIG_ESP_CONSOLE_USB_CDC
+#include <esp_vfs_cdcacm.h>
+#endif
 #include <esp_err.h>
 #include <esp_rom_sys.h>
 #include <esp_timer.h>
@@ -75,8 +87,10 @@ MCP45HVX1::Status mapI2c(esp_err_t err, const char* msg) {
   if (err == ESP_ERR_INVALID_ARG) {
     return MCP45HVX1::Status::Error(MCP45HVX1::Err::INVALID_PARAM, msg, err);
   }
-  if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
-    return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_NACK_ADDR, msg, err);
+  if (err == ESP_ERR_INVALID_RESPONSE) {
+    // IDF 6.0.1 reports NACK without its phase, and can collapse a transaction
+    // timeout to this value too. Preserve ambiguity instead of guessing.
+    return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_ERROR, msg, err);
   }
   return MCP45HVX1::Status::Error(MCP45HVX1::Err::I2C_BUS, msg, err);
 }
@@ -431,11 +445,6 @@ bool isPrimaryAddress(uint8_t address) {
   return address >= MCP45HVX1::cmd::MIN_ADDRESS && address <= MCP45HVX1::cmd::MAX_ADDRESS;
 }
 
-bool isAlternateAddress(uint8_t address) {
-  return address >= MCP45HVX1::cmd::ALT_MIN_ADDRESS &&
-         address <= MCP45HVX1::cmd::ALT_MAX_ADDRESS;
-}
-
 uint8_t activeMaxWiperCode() {
   return MCP45HVX1::MCP45HVX1::maxWiperCode(gCfg.resolution);
 }
@@ -448,34 +457,6 @@ bool parsePrimaryAddressArg(const char* text, uint8_t* out) {
   }
   *out = address;
   return true;
-}
-
-bool parseAlternateAddressArg(const char* text, uint8_t* out) {
-  uint8_t address = 0;
-  if (!parseU8Bounded(text, MCP45HVX1::cmd::ALT_MAX_ADDRESS, &address) ||
-      !isAlternateAddress(address)) {
-    return false;
-  }
-  *out = address;
-  return true;
-}
-
-bool parseAnySupportedAddressArg(const char* text, uint8_t* out, bool* alternate) {
-  uint8_t address = 0;
-  if (!parseU8Bounded(text, MCP45HVX1::cmd::ALT_MAX_ADDRESS, &address)) {
-    return false;
-  }
-  if (isPrimaryAddress(address)) {
-    *out = address;
-    *alternate = false;
-    return true;
-  }
-  if (isAlternateAddress(address)) {
-    *out = address;
-    *alternate = true;
-    return true;
-  }
-  return false;
 }
 
 bool isImplementedRegister(uint8_t reg) {
@@ -556,6 +537,7 @@ const char* errName(MCP45HVX1::Err code) {
     case MCP45HVX1::Err::DEVICE_NOT_FOUND: return "DEVICE_NOT_FOUND";
     case MCP45HVX1::Err::REGISTER_MISMATCH: return "REGISTER_MISMATCH";
     case MCP45HVX1::Err::BUSY: return "BUSY";
+    case MCP45HVX1::Err::OFFLINE: return "OFFLINE";
     case MCP45HVX1::Err::IN_PROGRESS: return "IN_PROGRESS";
     case MCP45HVX1::Err::UNSUPPORTED: return "UNSUPPORTED";
     case MCP45HVX1::Err::I2C_NACK_ADDR: return "I2C_NACK_ADDR";
@@ -648,15 +630,18 @@ bool parseTerminalMode(const char* text, MCP45HVX1::TerminalMode* out) {
     *out = MCP45HVX1::TerminalMode::Potentiometer;
     return true;
   }
-  if (strcmp(text, "bw") == 0 || strcmp(text, "rheostat_bw") == 0) {
+  if (strcmp(text, "bw") == 0 || strcmp(text, "b-w") == 0 ||
+      strcmp(text, "rheostat-bw") == 0 || strcmp(text, "rheostat_bw") == 0) {
     *out = MCP45HVX1::TerminalMode::RheostatBToW;
     return true;
   }
-  if (strcmp(text, "aw") == 0 || strcmp(text, "rheostat_aw") == 0) {
+  if (strcmp(text, "aw") == 0 || strcmp(text, "a-w") == 0 ||
+      strcmp(text, "rheostat-aw") == 0 || strcmp(text, "rheostat_aw") == 0) {
     *out = MCP45HVX1::TerminalMode::RheostatAToW;
     return true;
   }
-  if (strcmp(text, "float") == 0 || strcmp(text, "floating") == 0) {
+  if (strcmp(text, "float") == 0 || strcmp(text, "floating") == 0 ||
+      strcmp(text, "wiper-floating") == 0) {
     *out = MCP45HVX1::TerminalMode::WiperFloating;
     return true;
   }
@@ -752,9 +737,6 @@ static constexpr CommandHelpSpec COMMAND_HELP[] = {
     {"addr", "", "addr [0x3c..0x3f]", "Show or select a documented I2C address, then reinitialize.",
      HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr\naddr <0x3c..0x3f>",
      "addr\naddr 0x3c"},
-    {"addr_alt", "", "addr_alt <0x5c..0x5f>", "Opt in to the disputed alternate address range.",
-     HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr_alt <0x5c..0x5f>",
-     "addr_alt 0x5c"},
     {"variant", "res", "variant / res [hv31|hv51|7|8]", "Show or select the configured device resolution.",
      HelpSection::DeviceSelection, HelpSafety::Lifecycle,
      "variant\nvariant <hv31|hv51>\nres <7|8>", "variant hv51\nres 7"},
@@ -1068,20 +1050,18 @@ void printDriverHealth() {
 
 void printInfo() {
   const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
-  printf("addr=0x%02X variant=%s resolution=%u rab=%s nominal=%lu step=%.3f max_code=0x%02X default=0x%02X alt_range=%d\n",
+  printf("addr=0x%02X variant=%s resolution=%u rab=%s nominal=%lu step=%.3f max_code=0x%02X default=0x%02X\n",
          info.i2cAddress, variantName(info.resolution), static_cast<unsigned>(info.resolution),
          resistanceName(info.resistance), static_cast<unsigned long>(info.nominalResistanceOhms),
-         info.nominalStepOhms, info.maxWiperCode, info.defaultWiperCode,
-         info.usingAlternateAddressRange ? 1 : 0);
+         info.nominalStepOhms, info.maxWiperCode, info.defaultWiperCode);
 }
 
 void printConfigSnapshot() {
   MCP45HVX1::SettingsSnapshot s{};
   (void)gDev.getSettings(s);
   printInfo();
-  printf("timeout_ms=%lu alternate_allowed=%d general_call_allowed=%d require_por=%d require_msb_zero=%d color=%d verbose=%d\n",
+  printf("timeout_ms=%lu general_call_allowed=%d require_por=%d require_msb_zero=%d color=%d verbose=%d\n",
          static_cast<unsigned long>(s.config.i2cTimeoutMs),
-         s.config.allowAlternateAddressRange ? 1 : 0,
          s.config.allowGeneralCall ? 1 : 0,
          s.config.requirePowerOnDefaults ? 1 : 0,
          s.config.requireReadMsbZero ? 1 : 0,
@@ -1388,9 +1368,7 @@ void runSelftestSafe() {
                           gCfg.resolution == MCP45HVX1::Resolution::Bits8,
                       "", &pass, &fail, &skip);
   reportSelftestCheck("address policy valid",
-                      isPrimaryAddress(gCfg.i2cAddress) ||
-                          (gCfg.allowAlternateAddressRange &&
-                           isAlternateAddress(gCfg.i2cAddress)),
+                      isPrimaryAddress(gCfg.i2cAddress),
                       "", &pass, &fail, &skip);
 
   uint8_t last = 0;
@@ -1557,8 +1535,14 @@ void handleCommand(char* line) {
   if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
     handleHelp(args);
   } else if (strcmp(cmd, "version") == 0 || strcmp(cmd, "ver") == 0) {
+    if (!requireNoArgs(args, "Usage: version | ver")) {
+      return;
+    }
     printf("MCP45HVX1 %s %s\n", MCP45HVX1::VERSION, MCP45HVX1::VERSION_FULL);
   } else if (strcmp(cmd, "scan") == 0) {
+    if (!requireNoArgs(args, "Usage: scan")) {
+      return;
+    }
     scanBus();
   } else if (strcmp(cmd, "color") == 0) {
     if (*args == '\0') {
@@ -1577,30 +1561,22 @@ void handleCommand(char* line) {
     snprintf(local, sizeof(local), "%s", args);
     char* first = trim(local);
     char* second = splitWhitespace(first);
-    uint8_t address = 0;
-    bool alternate = false;
+    uint8_t address = gCfg.i2cAddress;
     MCP45HVX1::Resolution resolution = gCfg.resolution;
     if (*first != '\0') {
       if (parseResolutionText(first, &resolution)) {
-        gCfg.resolution = resolution;
-      } else if (parseAnySupportedAddressArg(first, &address, &alternate)) {
-        gCfg.i2cAddress = address;
-        gCfg.allowAlternateAddressRange = alternate;
-        if (alternate) {
-          printWarning("using disputed alternate address range 0x5c..0x5f.");
+        if (!isBlankArg(second)) {
+          puts("Usage: begin [addr] [7|8]");
+          return;
         }
-      } else {
+      } else if (!parsePrimaryAddressArg(first, &address) ||
+                 (!isBlankArg(second) && !parseResolutionText(second, &resolution))) {
         puts("Usage: begin [addr] [7|8]");
         return;
       }
     }
-    if (second != nullptr && *second != '\0') {
-      if (!parseResolutionText(second, &resolution)) {
-        puts("Usage: begin [addr] [7|8]");
-        return;
-      }
-      gCfg.resolution = resolution;
-    }
+    gCfg.i2cAddress = address;
+    gCfg.resolution = resolution;
     beginDriver();
   } else if (strcmp(cmd, "addr") == 0) {
     uint8_t address = 0;
@@ -1608,20 +1584,9 @@ void handleCommand(char* line) {
       printInfo();
     } else if (parsePrimaryAddressArg(args, &address)) {
       gCfg.i2cAddress = address;
-      gCfg.allowAlternateAddressRange = false;
       beginDriver();
     } else {
-      puts("Usage: addr <0x3c..0x3f>; use addr_alt for 0x5c..0x5f");
-    }
-  } else if (strcmp(cmd, "addr_alt") == 0) {
-    uint8_t address = 0;
-    if (parseAlternateAddressArg(args, &address)) {
-      printWarning("using disputed alternate address range 0x5c..0x5f.");
-      gCfg.i2cAddress = address;
-      gCfg.allowAlternateAddressRange = true;
-      beginDriver();
-    } else {
-      puts("Usage: addr_alt <0x5c..0x5f>");
+      puts("Usage: addr <0x3c..0x3f>");
     }
   } else if (strcmp(cmd, "res") == 0 || strcmp(cmd, "variant") == 0) {
     MCP45HVX1::Resolution resolution = gCfg.resolution;
@@ -1768,6 +1733,9 @@ void handleCommand(char* line) {
       readWiperCommand("wiper");
     }
   } else if (strcmp(cmd, "zero") == 0 || strcmp(cmd, "mid") == 0 || strcmp(cmd, "max") == 0) {
+    if (!requireNoArgs(args, "Usage: zero | mid | max")) {
+      return;
+    }
     const uint8_t max = MCP45HVX1::MCP45HVX1::maxWiperCode(gCfg.resolution);
     const uint8_t v = (strcmp(cmd, "zero") == 0) ? 0U : (strcmp(cmd, "mid") == 0 ? max / 2U : max);
     printWarning("wiper preset changes the analog output state.");
@@ -1885,8 +1853,14 @@ void handleCommand(char* line) {
       puts("Usage: rab [5k|10k|50k|100k]");
     }
   } else if (strcmp(cmd, "info") == 0) {
+    if (!requireNoArgs(args, "Usage: info")) {
+      return;
+    }
     printInfo();
   } else if (strcmp(cmd, "errata") == 0) {
+    if (!requireNoArgs(args, "Usage: errata")) {
+      return;
+    }
     printErrata();
   } else if (strcmp(cmd, "term") == 0 || strcmp(cmd, "terminal") == 0) {
     char local[LINE_LEN];
@@ -1912,7 +1886,7 @@ void handleCommand(char* line) {
       if (st.ok()) {
         printf("enabled=%d\n", enabledFlag ? 1 : 0);
       }
-    } else {
+    } else if (isBlankArg(local)) {
       MCP45HVX1::TerminalStatus status{};
       MCP45HVX1::Status st = gDev.readTerminalStatus(status);
       printStatus("term", st);
@@ -1922,6 +1896,8 @@ void handleCommand(char* line) {
                status.terminalA ? 1 : 0, status.terminalW ? 1 : 0,
                status.terminalB ? 1 : 0);
       }
+    } else {
+      puts("Usage: term a|w|b [on|off]");
     }
   } else if (strcmp(cmd, "shutdown") == 0 || strcmp(cmd, "software-shutdown") == 0) {
     bool enabled = false;
@@ -1995,11 +1971,111 @@ void handleCommand(char* line) {
   }
 }
 
+esp_err_t initConsole() {
+  if (setvbuf(stdin, nullptr, _IONBF, 0) != 0 ||
+      setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+    return ESP_FAIL;
+  }
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
+  const uart_port_t port = static_cast<uart_port_t>(CONFIG_ESP_CONSOLE_UART_NUM);
+  const esp_err_t st = uart_driver_install(port, 256, 0, 0, nullptr, 0);
+  if (st != ESP_OK) {
+    return st;
+  }
+  uart_vfs_dev_use_driver(port);
+  if (uart_vfs_dev_port_set_rx_line_endings(port, ESP_LINE_ENDINGS_LF) != 0 ||
+      uart_vfs_dev_port_set_tx_line_endings(port, ESP_LINE_ENDINGS_CRLF) != 0) {
+    return ESP_FAIL;
+  }
+#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+  usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+  const esp_err_t st = usb_serial_jtag_driver_install(&config);
+  if (st != ESP_OK) {
+    return st;
+  }
+  usb_serial_jtag_vfs_use_driver();
+  usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_LF);
+  usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+#elif CONFIG_ESP_CONSOLE_USB_CDC
+  // ESP-IDF startup already installs the ROM USB CDC console and its VFS.
+  esp_vfs_dev_cdcacm_set_rx_line_endings(ESP_LINE_ENDINGS_LF);
+  esp_vfs_dev_cdcacm_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+#else
+  return ESP_ERR_NOT_SUPPORTED;
+#endif
+  // Keep each input poll bounded even when a host disconnects mid-command.
+  const int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+  if (flags < 0 || fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) < 0) {
+    return ESP_FAIL;
+  }
+  clearerr(stdin);
+  return ESP_OK;
+}
+
+struct ConsoleInput {
+  char line[LINE_LEN] = {};
+  size_t length = 0;
+  bool discard = false;
+  bool skipLf = false;
+};
+
+bool pollConsole(ConsoleInput& input) {
+  for (size_t count = 0; count < LINE_LEN; ++count) {
+    // A one-byte read cannot lose a partial fgets result on EWOULDBLOCK.
+    char byte[2] = {};
+    errno = 0;
+    if (fgets(byte, sizeof(byte), stdin) == nullptr) {
+      const int error = errno;
+      if (error == EAGAIN || error == EWOULDBLOCK || error == EINTR) {
+        clearerr(stdin);
+        return true;
+      }
+      printf("Console input failed (errno=%d); CLI stopped.\n", error);
+      return false;
+    }
+    const char c = byte[0];
+    if (input.skipLf && c == '\n') {
+      input.skipLf = false;
+      continue;
+    }
+    input.skipLf = c == '\r';
+    if (c == '\r' || c == '\n') {
+      if (input.discard) {
+        puts("Command too long or contains invalid control bytes; discarded.");
+      } else {
+        input.line[input.length] = '\0';
+        if (*trim(input.line) != '\0') {
+          handleCommand(input.line);
+        }
+      }
+      input.length = 0;
+      input.discard = false;
+      printf("> ");
+    } else if (!input.discard) {
+      if (c == '\b' || c == 127) {
+        if (input.length > 0) {
+          --input.length;
+        }
+      } else if ((static_cast<unsigned char>(c) < 32U && c != '\t') ||
+                 input.length == sizeof(input.line) - 1U) {
+        // Drain through the terminator; never execute a truncated prefix.
+        input.discard = true;
+      } else {
+        input.line[input.length++] = c;
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 extern "C" void app_main(void) {
-  setvbuf(stdin, nullptr, _IONBF, 0);
-  setvbuf(stdout, nullptr, _IONBF, 0);
+  const esp_err_t consoleStatus = initConsole();
+  if (consoleStatus != ESP_OK) {
+    printf("Console init failed: %s; CLI stopped.\n", esp_err_to_name(consoleStatus));
+    return;
+  }
   puts("");
   printHeader("MCP45HVX1 native ESP-IDF CLI");
   if (!initBus()) {
@@ -2007,12 +2083,9 @@ extern "C" void app_main(void) {
   }
   beginDriver();
   printHelp();
-  char line[LINE_LEN] = {};
-  while (true) {
-    printf("> ");
-    if (fgets(line, sizeof(line), stdin) != nullptr) {
-      handleCommand(line);
-    }
-    vTaskDelay(pdMS_TO_TICKS(1));
+  ConsoleInput input;
+  printf("> ");
+  while (pollConsole(input)) {
+    vTaskDelay(1);
   }
 }

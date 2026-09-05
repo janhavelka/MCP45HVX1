@@ -11,6 +11,10 @@ namespace MCP45HVX1 {
 
 /// I2C write callback signature.
 ///
+/// Must support up to cmd::MAX_COMMAND_CHUNK (64) bytes in one transaction.
+/// Reject unsupported lengths before bus I/O with INVALID_PARAM; failures
+/// after bytes may have reached the chip must retain their transport error.
+///
 /// @param addr 7-bit I2C address.
 /// @param data Bytes to write. May be null only when len is zero.
 /// @param len Number of bytes to write.
@@ -93,7 +97,6 @@ struct Config {
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
   Resolution resolution = Resolution::Bits8; ///< Device variant, MCP45HV51 by default
   ResistanceOption resistance = ResistanceOption::R10K; ///< Nominal RAB option for helper math
-  bool allowAlternateAddressRange = false; ///< Allow disputed 0x5C-0x5F range for hardware checks
   bool allowGeneralCall = false;       ///< Explicit opt-in for unsafe broadcast General Call helpers
 
   // === Optional Initialization Writes ===

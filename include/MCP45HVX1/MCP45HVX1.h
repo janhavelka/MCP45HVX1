@@ -86,7 +86,6 @@ struct DeviceInfo {
   uint32_t nominalResistanceOhms = 10000; ///< Nominal A-to-B resistance in ohms.
   float nominalStepOhms = 0.0f; ///< Ideal code-to-code resistance step in ohms.
   float maxTerminalCurrentMilliAmps = 12.5f; ///< Datasheet terminal-current limit.
-  bool usingAlternateAddressRange = false; ///< True when using disputed 0x5C-0x5F range.
 };
 
 /// Static summary of the published silicon errata that affects bus planning.
@@ -110,22 +109,22 @@ struct SiliconErrataInfo {
 /// Snapshot of the current driver settings and health state.
 struct SettingsSnapshot {
   Config config;                 ///< Active runtime configuration snapshot
-  DriverState state = DriverState::UNINIT;
-  bool initialized = false;
-  uint32_t lastOkMs = 0;
-  uint32_t lastErrorMs = 0;
-  Status lastError = Status::Ok();
+  DriverState state = DriverState::UNINIT; ///< Current lifecycle/health state.
+  bool initialized = false;      ///< True after baseline initialization succeeds.
+  uint32_t lastOkMs = 0;         ///< Timestamp of the last tracked successful device transfer.
+  uint32_t lastErrorMs = 0;      ///< Timestamp of the last counted failure.
+  Status lastError = Status::Ok(); ///< Most recent counted failure, retained after success.
   bool hardwareStateUncertain = false; ///< true when volatile hardware state needs readback
   Status hardwareStateUncertainError = Status::Ok(); ///< Last ambiguous state-changing failure
-  uint8_t consecutiveFailures = 0;
-  uint32_t totalFailures = 0;
-  uint32_t totalSuccess = 0;
-  bool cachedWiperKnown = false;
-  uint8_t cachedWiper = 0;
-  bool cachedTconKnown = false;
-  uint8_t cachedTcon = 0;
-  bool addressPointerKnown = false;
-  uint8_t addressPointer = cmd::REG_WIPER0;
+  uint8_t consecutiveFailures = 0; ///< Saturating consecutive failure count.
+  uint32_t totalFailures = 0;    ///< Saturating counted failures since begin()/end().
+  uint32_t totalSuccess = 0;     ///< Saturating tracked device successes since begin()/end().
+  bool cachedWiperKnown = false; ///< True when cachedWiper is valid.
+  uint8_t cachedWiper = 0;      ///< Most recently read, written, or predicted wiper code.
+  bool cachedTconKnown = false;  ///< True when cachedTcon is valid.
+  uint8_t cachedTcon = 0;       ///< Most recently read or written TCON value.
+  bool addressPointerKnown = false; ///< True when the last-address register is known.
+  uint8_t addressPointer = cmd::REG_WIPER0; ///< Last-address register when known.
 };
 
 /// MCP45HVX1 driver class.
@@ -156,6 +155,9 @@ public:
   /// and WLAT are stable before calling begin().
   /// Output-changing startup writes are opt-in via Config::writeInitialWiper
   /// and Config::writeInitialTcon and run only after baseline reads succeed.
+  /// With both writes enabled, shutdown or disconnect-only TCON changes run
+  /// first. Leaving shutdown or connecting any previously open terminal runs
+  /// after the wiper write. This ordering does not prove physical output state.
   /// If an optional startup write fails, the driver preserves config/transport
   /// state for readback/recover diagnostics and uses hardwareStateUncertain()
   /// for ambiguous write failures.
@@ -216,7 +218,8 @@ public:
   /// per poll even when maxInstructions is larger.
   /// @param nowMs Current monotonic time in milliseconds; reserved for caller scheduling.
   /// @param maxInstructions Maximum instructions to attempt in this poll.
-  /// @return IN_PROGRESS while work remains, otherwise the final job status.
+  /// @return IN_PROGRESS while work remains, otherwise the final job status;
+  /// INVALID_PARAM if no job has been started since construction/begin()/end().
   Status pollJob(uint32_t nowMs, uint8_t maxInstructions);
 
   /// @return Active or most recently completed job snapshot.
@@ -606,8 +609,6 @@ private:
 
   // Validation and state helpers
   static bool _isValidAddress(uint8_t address);
-  static bool _isPrimaryAddress(uint8_t address);
-  static bool _isAlternateAddress(uint8_t address);
   static bool _isValidResistanceOption(ResistanceOption option);
   static bool _isValidRegister(uint8_t reg);
   static bool _isWritableRegister(uint8_t reg);

@@ -84,14 +84,17 @@ bool readToken(const char*& p, char* out, size_t outLen) {
   }
 
   size_t i = 0;
+  bool overflow = false;
   while (*p != '\0' && *p != ' ' && *p != '\t') {
     if ((i + 1U) < outLen) {
       out[i++] = *p;
+    } else {
+      overflow = true;
     }
     ++p;
   }
   out[i] = '\0';
-  return i > 0U;
+  return i > 0U && !overflow;
 }
 
 bool parseU32(const char*& p, uint32_t maxValue, uint32_t& out) {
@@ -142,13 +145,8 @@ bool parseBool(const char*& p, bool& out) {
   return false;
 }
 
-bool isPrimaryAddress(uint8_t address) {
+bool isValidAddress(uint8_t address) {
   return address >= MCP45HVX1::cmd::MIN_ADDRESS && address <= MCP45HVX1::cmd::MAX_ADDRESS;
-}
-
-bool isAlternateAddress(uint8_t address) {
-  return address >= MCP45HVX1::cmd::ALT_MIN_ADDRESS &&
-         address <= MCP45HVX1::cmd::ALT_MAX_ADDRESS;
 }
 
 const char* statusCause(MCP45HVX1::Err code) {
@@ -177,6 +175,8 @@ const char* statusCause(MCP45HVX1::Err code) {
       return "register/data validation failed";
     case MCP45HVX1::Err::BUSY:
       return "device or driver is busy";
+    case MCP45HVX1::Err::OFFLINE:
+      return "device is latched offline; run recover";
     case MCP45HVX1::Err::IN_PROGRESS:
       return "operation is still in progress";
     case MCP45HVX1::Err::UNSUPPORTED:
@@ -190,7 +190,8 @@ const char* statusColor(const MCP45HVX1::Status& st) {
   if (st.ok()) {
     return LOG_COLOR_GREEN;
   }
-  return (st.code == MCP45HVX1::Err::BUSY || st.code == MCP45HVX1::Err::IN_PROGRESS)
+  return (st.code == MCP45HVX1::Err::BUSY || st.code == MCP45HVX1::Err::OFFLINE ||
+          st.code == MCP45HVX1::Err::IN_PROGRESS)
              ? LOG_COLOR_YELLOW
              : LOG_COLOR_RED;
 }
@@ -244,8 +245,7 @@ const char* resistanceName(MCP45HVX1::ResistanceOption option) {
 
 bool parseResolution(const char*& p, MCP45HVX1::Resolution& out) {
   // Must hold the longest accepted alias ("mcp45hv31", 9 chars) plus the
-  // terminator; readToken() truncates silently, so a short buffer would make
-  // those aliases permanently unmatchable.
+  // terminator; readToken() rejects tokens that do not fit.
   char token[12] = {};
   if (!readToken(p, token, sizeof(token))) {
     return false;
@@ -319,16 +319,17 @@ bool parseMode(const char*& p, MCP45HVX1::TerminalMode& out) {
     return true;
   }
   if (strcmp(token, "bw") == 0 || strcmp(token, "b-w") == 0 ||
-      strcmp(token, "rheostat-bw") == 0) {
+      strcmp(token, "rheostat-bw") == 0 || strcmp(token, "rheostat_bw") == 0) {
     out = MCP45HVX1::TerminalMode::RheostatBToW;
     return true;
   }
   if (strcmp(token, "aw") == 0 || strcmp(token, "a-w") == 0 ||
-      strcmp(token, "rheostat-aw") == 0) {
+      strcmp(token, "rheostat-aw") == 0 || strcmp(token, "rheostat_aw") == 0) {
     out = MCP45HVX1::TerminalMode::RheostatAToW;
     return true;
   }
-  if (strcmp(token, "float") == 0 || strcmp(token, "wiper-floating") == 0) {
+  if (strcmp(token, "float") == 0 || strcmp(token, "wiper-floating") == 0 ||
+      strcmp(token, "floating") == 0) {
     out = MCP45HVX1::TerminalMode::WiperFloating;
     return true;
   }
@@ -416,9 +417,8 @@ bool parseFloatRange(const char*& p, float minValue, float maxValue, float& out)
 }
 
 void printActiveConfigLine() {
-  LOG_SERIAL.printf("  Active: addr=0x%02X range=%s variant=%s resolution=%u-bit/%u taps rab=%u ohm\n",
+  LOG_SERIAL.printf("  Active: addr=0x%02X variant=%s resolution=%u-bit/%u taps rab=%u ohm\n",
                     gConfig.i2cAddress,
-                    isAlternateAddress(gConfig.i2cAddress) ? "alternate" : "standard",
                     variantName(gConfig.resolution),
                     static_cast<unsigned>(gConfig.resolution),
                     static_cast<unsigned>(tapCount(gConfig.resolution)),
@@ -487,11 +487,6 @@ void printStatus(const MCP45HVX1::Status& st) {
 }
 
 MCP45HVX1::Status beginDevice() {
-  gConfig.allowAlternateAddressRange = isAlternateAddress(gConfig.i2cAddress);
-  if (gConfig.allowAlternateAddressRange) {
-    LOGW("Using disputed alternate address range 0x5C-0x5F; docs favor 0x3C-0x3F");
-  }
-
   gDev.end();
   MCP45HVX1::Status st = gDev.begin(gConfig);
   printStatus(st);
@@ -526,9 +521,7 @@ void printVersion() {
 void printDeviceInfo() {
   const MCP45HVX1::DeviceInfo info = gDev.getDeviceInfo();
   LOG_SERIAL.println("=== Device Info ===");
-  LOG_SERIAL.printf("  Address: 0x%02X (%s range)\n",
-                    info.i2cAddress,
-                    info.usingAlternateAddressRange ? "alternate" : "primary");
+  LOG_SERIAL.printf("  Address: 0x%02X\n", info.i2cAddress);
   LOG_SERIAL.printf("  Variant: %s (configured, not auto-detected)\n",
                     variantName(info.resolution));
   LOG_SERIAL.printf("  Resolution: %u-bit / %u taps (max code 0x%02X, POR 0x%02X)\n",
@@ -786,10 +779,6 @@ void printConfigSnapshot() {
   LOG_SERIAL.println("=== MCP45HVX1 Configuration ===");
   LOG_SERIAL.printf("  Active address: 0x%02X\n", info.i2cAddress);
   LOG_SERIAL.println("  Address policy: standard 0x3C..0x3F");
-  LOG_SERIAL.printf("  Alternate address range enabled: %s%s%s\n",
-                    s.config.allowAlternateAddressRange ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
-                    s.config.allowAlternateAddressRange ? "yes" : "no",
-                    LOG_COLOR_RESET);
   LOG_SERIAL.printf("  General Call core opt-in: %s%s%s\n",
                     s.config.allowGeneralCall ? LOG_COLOR_YELLOW : LOG_COLOR_GREEN,
                     s.config.allowGeneralCall ? "yes" : "no",
@@ -875,9 +864,6 @@ static constexpr CommandHelpSpec COMMAND_HELP[] = {
     {"addr", "", "addr [0x3c..0x3f]", "Show or select a documented I2C address, then reinitialize.",
      HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr\naddr <0x3c..0x3f>",
      "addr\naddr 0x3c"},
-    {"addr_alt", "", "addr_alt <0x5c..0x5f>", "Opt in to the disputed alternate address range.",
-     HelpSection::DeviceSelection, HelpSafety::Lifecycle, "addr_alt <0x5c..0x5f>",
-     "addr_alt 0x5c"},
     {"variant", "res", "variant / res [hv31|hv51|7|8]", "Show or select the configured device resolution.",
      HelpSection::DeviceSelection, HelpSafety::Lifecycle,
      "variant\nvariant <hv31|hv51>\nres <7|8>", "variant hv51\nres 7"},
@@ -1092,21 +1078,28 @@ void handleBegin(const char* args) {
   MCP45HVX1::Config next = gConfig;
   const char* p = args;
   char token[16] = {};
-  if (!readToken(p, token, sizeof(token))) {
+  if (noMoreArgs(p)) {
     beginDevice();
+    return;
+  }
+  if (!readToken(p, token, sizeof(token))) {
+    LOGE("usage: begin [addr] [7|8]");
     return;
   }
 
   const char* tokenPtr = token;
   MCP45HVX1::Resolution resolution = next.resolution;
   if (parseResolution(tokenPtr, resolution) && noMoreArgs(tokenPtr)) {
+    if (!noMoreArgs(p)) {
+      LOGE("usage: begin [addr] [7|8]");
+      return;
+    }
     next.resolution = resolution;
   } else {
     tokenPtr = token;
     uint32_t address = 0;
     if (!parseU32(tokenPtr, 0x7F, address) || !noMoreArgs(tokenPtr) ||
-        (!isPrimaryAddress(static_cast<uint8_t>(address)) &&
-         !isAlternateAddress(static_cast<uint8_t>(address)))) {
+        !isValidAddress(static_cast<uint8_t>(address))) {
       LOGE("usage: begin [addr] [7|8]");
       return;
     }
@@ -1130,33 +1123,17 @@ void handleAddress(const char* args) {
   if (noMoreArgs(p)) {
     printActiveConfigLine();
     LOG_SERIAL.println("  Standard address range: 0x3C..0x3F");
-    LOG_SERIAL.println("  Alternate 0x5C..0x5F is disputed and requires addr_alt");
     return;
   }
   if (!parseU32(p, 0x7F, address) || !noMoreArgs(p)) {
     LOGE("usage: addr [0x3c..0x3f]");
     return;
   }
-  if (!isPrimaryAddress(static_cast<uint8_t>(address))) {
-    LOGE("address must be documented 0x3C-0x3F; use addr_alt for disputed 0x5C-0x5F");
+  if (!isValidAddress(static_cast<uint8_t>(address))) {
+    LOGE("address must be documented 0x3C-0x3F");
     return;
   }
   gConfig.i2cAddress = static_cast<uint8_t>(address);
-  gConfig.allowAlternateAddressRange = false;
-  beginDevice();
-}
-
-void handleAlternateAddress(const char* args) {
-  uint32_t address = 0;
-  const char* p = args;
-  if (!parseU32(p, 0x7F, address) || !noMoreArgs(p) ||
-      !isAlternateAddress(static_cast<uint8_t>(address))) {
-    LOGE("usage: addr_alt <0x5c..0x5f>");
-    return;
-  }
-  LOGW("Using disputed alternate address range 0x5C-0x5F; not claimed hardware-validated");
-  gConfig.i2cAddress = static_cast<uint8_t>(address);
-  gConfig.allowAlternateAddressRange = true;
   beginDevice();
 }
 
@@ -1506,10 +1483,12 @@ void handleColor(const char* args) {
 void handleRaw(const char* args) {
   const char* p = args;
   char sub[8] = {};
+  if (noMoreArgs(p)) {
+    dumpRegisters();
+    return;
+  }
   if (!readToken(p, sub, sizeof(sub))) {
-    if (requireNoArgs("raw", p)) {
-      dumpRegisters();
-    }
+    LOGE("usage: raw write <0x00|0x04> <0x00..0xff>");
     return;
   }
   if (strcmp(sub, "write") != 0) {
@@ -1674,8 +1653,7 @@ void runSelfTestSafe() {
                   gConfig.resolution == MCP45HVX1::Resolution::Bits8,
               "");
   reportCheck("address policy valid",
-              isPrimaryAddress(gConfig.i2cAddress) ||
-                  (gConfig.allowAlternateAddressRange && isAlternateAddress(gConfig.i2cAddress)),
+              isValidAddress(gConfig.i2cAddress),
               "");
 
   uint8_t last = 0;
@@ -1832,6 +1810,16 @@ MCP45HVX1::Status restoreSnapshot(const MCP45HVX1::RegisterSnapshot& snapshot) {
     LOGW("restore TCON failed");
     printStatus(st);
   }
+  if (first.ok()) {
+    MCP45HVX1::RegisterSnapshot restored;
+    first = gDev.readSnapshot(restored);
+    if (first.ok() && (restored.wiper != snapshot.wiper || restored.tcon != snapshot.tcon)) {
+      first = MCP45HVX1::Status::Error(MCP45HVX1::Err::REGISTER_MISMATCH,
+                                      "Baseline restore readback mismatch");
+    }
+  }
+  // This verifies registers only; WLAT/SHDN and the physical output remain external.
+  gOutputStateUncertain = !first.ok();
   return first;
 }
 
@@ -2157,8 +2145,6 @@ void handleCommand(String line) {
     handleBegin(p);
   } else if (strcmp(command, "addr") == 0) {
     handleAddress(p);
-  } else if (strcmp(command, "addr_alt") == 0) {
-    handleAlternateAddress(p);
   } else if (strcmp(command, "res") == 0 || strcmp(command, "variant") == 0) {
     handleResolution(p);
   } else if (strcmp(command, "rab") == 0) {
@@ -2208,7 +2194,7 @@ void handleCommand(String line) {
   } else if (strcmp(command, "mid") == 0) {
     if (requireNoArgs(command, p)) {
       warnOutputChanging("mid");
-      const MCP45HVX1::Status st = gDev.writeWiperFraction(0.5f);
+      const MCP45HVX1::Status st = gDev.writeWiper(porWiperCode(gConfig.resolution));
       printStatus(st);
       if (st.ok()) readRegisters();
     }

@@ -182,30 +182,37 @@ def _render_version_header(namespace: str, version: str) -> str:
 #include <stdint.h>
 
 #ifndef {prefix}_VERSION_STRING
+/// @brief Semantic release version string.
 #define {prefix}_VERSION_STRING "{version}"
 #endif
 
 #ifndef {prefix}_BUILD_DATE
+/// @brief Build date, overridable by the application.
 #define {prefix}_BUILD_DATE __DATE__
 #endif
 
 #ifndef {prefix}_BUILD_TIME
+/// @brief Build time, overridable by the application.
 #define {prefix}_BUILD_TIME __TIME__
 #endif
 
 #ifndef {prefix}_BUILD_TIMESTAMP
+/// @brief Combined build date and time.
 #define {prefix}_BUILD_TIMESTAMP {prefix}_BUILD_DATE " " {prefix}_BUILD_TIME
 #endif
 
 #ifndef {prefix}_GIT_COMMIT
+/// @brief Git commit identifier, or unknown when unavailable.
 #define {prefix}_GIT_COMMIT "unknown"
 #endif
 
 #ifndef {prefix}_GIT_STATUS
+/// @brief Git working tree status, or unknown when unavailable.
 #define {prefix}_GIT_STATUS "unknown"
 #endif
 
 #ifndef {prefix}_VERSION_FULL
+/// @brief Release version with commit, timestamp, and working tree status.
 #define {prefix}_VERSION_FULL {prefix}_VERSION_STRING " (" {prefix}_GIT_COMMIT ", " {prefix}_BUILD_TIMESTAMP ", " {prefix}_GIT_STATUS ")"
 #endif
 
@@ -367,6 +374,7 @@ def main(args: List[str]) -> int:
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
 
-result = main([])
-if result != 0:
-    raise SystemExit(result)
+if ENV is not None:
+    result = main([])
+    if result != 0:
+        raise SystemExit(result)

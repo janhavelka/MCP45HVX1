@@ -12,40 +12,47 @@
 #include <stdint.h>
 
 #ifndef MCP45HVX1_VERSION_STRING
-#define MCP45HVX1_VERSION_STRING "1.1.0"
+/// @brief Semantic release version string.
+#define MCP45HVX1_VERSION_STRING "2.0.0"
 #endif
 
 #ifndef MCP45HVX1_BUILD_DATE
+/// @brief Build date, overridable by the application.
 #define MCP45HVX1_BUILD_DATE __DATE__
 #endif
 
 #ifndef MCP45HVX1_BUILD_TIME
+/// @brief Build time, overridable by the application.
 #define MCP45HVX1_BUILD_TIME __TIME__
 #endif
 
 #ifndef MCP45HVX1_BUILD_TIMESTAMP
+/// @brief Combined build date and time.
 #define MCP45HVX1_BUILD_TIMESTAMP MCP45HVX1_BUILD_DATE " " MCP45HVX1_BUILD_TIME
 #endif
 
 #ifndef MCP45HVX1_GIT_COMMIT
+/// @brief Git commit identifier, or unknown when unavailable.
 #define MCP45HVX1_GIT_COMMIT "unknown"
 #endif
 
 #ifndef MCP45HVX1_GIT_STATUS
+/// @brief Git working tree status, or unknown when unavailable.
 #define MCP45HVX1_GIT_STATUS "unknown"
 #endif
 
 #ifndef MCP45HVX1_VERSION_FULL
+/// @brief Release version with commit, timestamp, and working tree status.
 #define MCP45HVX1_VERSION_FULL MCP45HVX1_VERSION_STRING " (" MCP45HVX1_GIT_COMMIT ", " MCP45HVX1_BUILD_TIMESTAMP ", " MCP45HVX1_GIT_STATUS ")"
 #endif
 
 namespace MCP45HVX1 {
 
 /// @brief Major version (breaking changes).
-static constexpr uint16_t VERSION_MAJOR = 1;
+static constexpr uint16_t VERSION_MAJOR = 2;
 
 /// @brief Minor version (backward-compatible features).
-static constexpr uint16_t VERSION_MINOR = 1;
+static constexpr uint16_t VERSION_MINOR = 0;
 
 /// @brief Patch version (backward-compatible fixes).
 static constexpr uint16_t VERSION_PATCH = 0;
@@ -54,10 +61,10 @@ static constexpr uint16_t VERSION_PATCH = 0;
 static constexpr const char* VERSION = MCP45HVX1_VERSION_STRING;
 
 /// @brief Encoded version for numeric comparison: MAJOR*10000 + MINOR*100 + PATCH.
-static constexpr uint32_t VERSION_CODE = 10100;
+static constexpr uint32_t VERSION_CODE = 20000;
 
 /// @brief Backward-compatible alias used by older repositories.
-static constexpr int VERSION_INT = 10100;
+static constexpr int VERSION_INT = 20000;
 
 /// @brief Build date string.
 static constexpr const char* BUILD_DATE = MCP45HVX1_BUILD_DATE;

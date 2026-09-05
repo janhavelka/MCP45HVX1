@@ -135,9 +135,7 @@ def format_hex(value: int) -> str:
 def address_command(address: int) -> str:
     if 0x3C <= address <= 0x3F:
         return f"addr {format_hex(address)}"
-    if 0x5C <= address <= 0x5F:
-        return f"addr_alt {format_hex(address)}"
-    raise ValueError("address must be 0x3C..0x3F, or 0x5C..0x5F with alternate opt-in")
+    raise ValueError("address must be 0x3C..0x3F")
 
 
 def import_serial() -> Any:
@@ -235,7 +233,8 @@ def command_failed(command: str, output: str) -> bool:
         return True
     if "Unknown command" in text:
         return True
-    if "Usage:" in text and command not in {"help", "?"}:
+    command_words = command.split()
+    if "Usage:" in text and (not command_words or command_words[0] not in {"help", "?"}):
         return True
     if re.search(r"(?i)restore .*failed", text):
         return True
@@ -245,7 +244,7 @@ def command_failed(command: str, output: str) -> bool:
         return True
     command_prefixes = (
         r"probe|read|readwiper|readtcon|dump|stress|selftest|gc|wiper|tcon|"
-        r"mode|raw write|cfg|settings|drv|health|state|reg|rreg|addr|addr_alt|"
+        r"mode|raw write|cfg|settings|drv|health|state|reg|rreg|addr|"
         r"variant|res|rab|recover|last"
     )
     if re.search(rf"(?m)^(?:{command_prefixes})[^:\n]*:\s+(?!OK\b)[A-Z_]+", text):
@@ -255,8 +254,6 @@ def command_failed(command: str, output: str) -> bool:
             return True
         if re.search(r"\bErrors:\s*[1-9]\d*", text):
             return True
-    if command in {"help", "?", "version", "ver"}:
-        return False
     return False
 
 

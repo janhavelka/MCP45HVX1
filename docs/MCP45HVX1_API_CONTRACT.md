@@ -25,7 +25,8 @@ not change.
 | `INVALID_CONFIG` | A `Config` field is missing or invalid |
 | `INVALID_PARAM` | An argument is out of range for the configured variant |
 | `UNSUPPORTED` | The operation is disabled by configuration or has no callback |
-| `BUSY` | A poll job is active, or the driver is latched OFFLINE |
+| `BUSY` | A poll job is active |
+| `OFFLINE` | The driver is latched offline; recovery is required |
 | `IN_PROGRESS` | `pollJob()` has work remaining; call it again |
 | `DEVICE_NOT_FOUND` | Presence check saw a definite address NACK |
 | `REGISTER_MISMATCH` | Readback did not match the documented register format |
@@ -44,6 +45,17 @@ The transport-detail codes are produced by application callbacks. The core maps
 only one of them: a definite address NACK during `begin()` or `probe()` becomes
 `DEVICE_NOT_FOUND`. Everything else is returned as the callback reported it.
 
+An adapter must preserve uncertainty when its framework cannot distinguish
+address and data NACKs. ESP-IDF 6.0.1 combines these into
+`ESP_ERR_INVALID_RESPONSE`; the example maps a transmit/combined-transfer NACK
+to `I2C_ERROR`, retaining the native detail. The same native response can
+also wrap an internal transaction timeout, including on receive-only calls,
+so that response never proves an address NACK. ESP32 Wire combines write NACK causes and exposes
+only a byte count for reads; its example reports ambiguous NACKs and short
+reads (including zero bytes) as `I2C_ERROR`. Thus `DEVICE_NOT_FOUND` is not
+guaranteed from either example's combined `begin()`/`probe()` read. No extra
+probe or retry attempts to reconstruct a failed transaction's history.
+
 ## Transport Ownership
 
 - Core code under `include/` and `src/` is framework-neutral.
@@ -51,6 +63,10 @@ only one of them: a definite address NACK during `begin()` or `probe()` becomes
   interrupts, mutexes, rail sequencing, or bus-reset policy.
 - Applications provide `Config::i2cWrite`, `Config::i2cWriteRead`, and optional
   `Config::busReset` callbacks.
+- The write callback must support up to `cmd::MAX_COMMAND_CHUNK` (64) bytes
+  per INC/DEC transaction. This is a driver work/buffer bound, not a silicon
+  limit. Both supplied adapters support it; smaller transports must reject
+  oversize requests before bus access with `INVALID_PARAM`.
 - `i2cUser`, `controlUser`, and `timeUser` are non-owning context pointers and
   must outlive every driver call that may use them.
 
@@ -68,12 +84,10 @@ only one of them: a definite address NACK during `begin()` or `probe()` becomes
 
 - The documented address range is `0x3C..0x3F` (DS20005304B §6.2.4,
   Table 6-2).
-- `0x5C..0x5F` are 8-bit *control bytes* of the standard-voltage
-  MCP45XX/46XX family, not 7-bit addresses of this part. They are accepted only
-  when `Config::allowAlternateAddressRange` is explicitly enabled; that option
-  is retained for compatibility only and is scheduled for removal. See
-  [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md) and finding 2 of
-  [`CODE_AUDIT.md`](CODE_AUDIT.md).
+- All other addresses are rejected. `0x5C..0x5F` are 8-bit *control bytes* of
+  the standard-voltage MCP45XX/46XX family, not 7-bit addresses of this part.
+  The former alternate-address option and CLI command have been removed.
+  See [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md).
 - MCP45HV31 is modeled as 7-bit / 128 taps with POR/BOR Wiper default `0x3F`.
 - MCP45HV51 is modeled as 8-bit / 256 taps with POR/BOR Wiper default `0x7F`.
 - RAB selection is used for nominal helper math and terminal-current limits. It
@@ -132,6 +146,14 @@ config fields:
 - `Config::writeInitialWiper`
 - `Config::initialWiperCode`
 
+When both writes are requested, `begin()` uses the TCON readback to order
+them. It writes the wiper before leaving software shutdown or enabling any
+previously disconnected terminal. For shutdown, unchanged topology, and changes
+that only disconnect terminals, it writes TCON first. Partial reconnections use the
+same rule as a full reconnection. These two writes cannot make an arbitrary
+live circuit transition atomic or override SHDN/WLAT; applications still own
+external isolation and analog sequencing.
+
 If an optional startup write fails after attempted I2C access, `begin()` returns
 the original error and preserves enough runtime state for `readWiper()`,
 `readTcon()`, `readSnapshot()`, or `recover()` to inspect possible side effects.
@@ -169,9 +191,12 @@ the original error and preserves enough runtime state for `readWiper()`,
   APIs until recovery.
 - `lastOkMs()`, `lastErrorMs()`, `lastError()`, `consecutiveFailures()`,
   `totalFailures()`, and `totalSuccess()` expose tracked health information.
+  Local `INVALID_CONFIG`, `INVALID_PARAM`, `NOT_INITIALIZED`, and
+  `UNSUPPORTED` results do not count as device failures, including when
+  returned by a callback.
 - `getDeviceInfo()` reports active address, configured resolution and RAB,
   max/default Wiper code, nominal resistance, ideal step, terminal-current
-  limit, and alternate-address-range use.
+  limit.
 - `siliconErrataInfo()` returns static DS80000649B release-gate information for
   CLI diagnostics and documentation; it is not proof that any physical silicon
   lot is unaffected.
@@ -210,6 +235,11 @@ after the read when the requested bit already matches. Wiper step jobs split
 multi-step operations into bounded command chunks and run at most one chunk per
 poll. A direct Wiper set job is a single output-changing instruction.
 
+Polling before any job has been started, or after `begin()`/`end()` resets
+the job state, returns `INVALID_PARAM`. Once a job completes, repeated polls
+return its final status. A zero-step increment/decrement publishes its own
+successful completed snapshot.
+
 While a job is active, other bus-touching public APIs return `Err::BUSY` without
 issuing I2C traffic. `JobSnapshot` reports job type, active state,
 output-changing classification, planned and completed instructions, the last
@@ -233,7 +263,7 @@ the only responder. The core General Call helpers are disabled unless
 `Config::allowGeneralCall` is explicitly true. When disabled, they return
 `UNSUPPORTED` without issuing bus traffic or changing cache/uncertainty state.
 The configuration gate is checked before the OFFLINE latch, so a disabled
-helper reports `UNSUPPORTED` rather than `BUSY` even on an offline driver —
+helper reports `UNSUPPORTED` rather than `OFFLINE` even on an offline driver —
 `recover()` cannot enable a helper that configuration disabled.
 Production firmware must require isolated-bus evidence or a documented
 shared-bus risk acceptance before enabling output-changing General Call use.
