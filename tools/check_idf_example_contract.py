@@ -210,8 +210,7 @@ def main() -> int:
     if idf_rows != arduino_rows:
         fail("Arduino and ESP-IDF detailed-help tables differ in names, grammar, safety, or examples")
     for cmd, token in IDF_COMMAND_ACTIONS.items():
-        if cmd in dispatch:
-            require_token(text, token, f"ESP-IDF command '{cmd}' action")
+        require_token(text, token, f"ESP-IDF command '{cmd}' action")
     for token in (
         "handleHelp(args)",
         "findCommandHelp",
@@ -298,25 +297,22 @@ def main() -> int:
     else:
         fail("mandatory IDF color command missing from help")
 
-    if "selftest output" in text:
-        for token in (
-            "runSelftestSafe",
-            "runOutputSelftest",
-            "restoreSnapshot",
-            "runOutputSelftest();",
-            "readSnapshot(baseline",
-            "writeWiper",
-            "writeTcon",
-            "restore baseline",
-            "selftest (safe)",
-            "selftest (output-changing)",
-            "Selftest result: pass=",
-        ):
-            require_token(text, token, "IDF selftest behavior")
-        if "native checks remain state-restoring" in text:
-            fail("selftest output is still documented as read-only/state-restoring only")
-    else:
-        fail("selftest output missing from IDF help")
+    for token in (
+        "runSelftestSafe",
+        "runOutputSelftest",
+        "restoreSnapshot",
+        "runOutputSelftest();",
+        "readSnapshot(baseline",
+        "writeWiper",
+        "writeTcon",
+        "restore baseline",
+        "selftest (safe)",
+        "selftest (output-changing)",
+        "Selftest result: pass=",
+    ):
+        require_token(text, token, "IDF selftest behavior")
+    if "native checks remain state-restoring" in text:
+        fail("selftest output is still documented as read-only/state-restoring only")
 
     for token in (
         "gBus.bus == nullptr",

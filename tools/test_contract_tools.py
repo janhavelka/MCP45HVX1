@@ -31,10 +31,20 @@ class ContractToolTests(unittest.TestCase):
         self.assertIsNotNone(line_length, "missing IDF line length constant")
         self.assertIsNotNone(console_state, "missing IDF console input state")
         functions = ("trim", "mapI2c", "parseU32Bounded", "parseFloatArg", "parseFloatRangeArg",
-                     "parseBoolArg", "parseResolutionText", "parseResistance", "parseTerminalMode")
+                     "parseBoolArg", "parseResolutionText", "parseResistance", "parseTerminalMode",
+                     "isBlankArg", "requireNoArgs")
         extracted = [line_length.group()]
         extracted.extend(function_definition(source, name, "ESP-IDF CLI") for name in functions)
         extracted.extend((console_state.group(), function_definition(source, "pollConsole", "ESP-IDF CLI")))
+        # Compile the actual preset branch, including its argument guard and
+        # write call. Wrap its balanced body without copying the calculation.
+        handler = function_body(source, "handleCommand", "ESP-IDF CLI")
+        preset = re.search(r'\bif\s*\(strcmp\(cmd, "zero"\).*?\{', handler)
+        self.assertIsNotNone(preset, "missing IDF zero/mid/max dispatch branch")
+        extracted.append(function_definition(
+            "void dispatchPreset(const char* cmd, const char* args) " + handler[preset.end() - 1:],
+            "dispatchPreset", "ESP-IDF CLI preset",
+        ))
         with tempfile.TemporaryDirectory(prefix="mcp45hvx1-idf-console-") as tmp:
             workspace = pathlib.Path(tmp)
             (workspace / "idf_console_under_test.h").write_text("\n".join(extracted), encoding="utf-8")
@@ -52,9 +62,21 @@ class ContractToolTests(unittest.TestCase):
             '// a comment with an unmatched " quote\nmicros();',
             '/* a comment with an unmatched " quote */ delay(1);',
             'auto text = R"tag(" // /* Serial.println(1);)tag"; yield();',
-            "auto a = 1'000; delayMicroseconds(1); auto b = 2'000;",
+            "auto a = 1'000'000; delayMicroseconds(1); auto b = 2'000;",
+            "// don't treat an apostrophe as a character literal\nmillis();",
+            'auto text = R"tag(//)tag"; Serial.println(1);',
+            'auto text = R"tag(/*)tag"; micros();',
+            'auto text = R"tag(")tag"; delay(1);',
+            "auto c = '\"'; yield();",
+            "auto c = L'\"'; delayMicroseconds(1);",
+            "auto c = '\\''; millis();",
+            'auto text = "escaped \\" // quote"; Serial.println(1);',
+            '/* // */ micros();',
         )
-        calls = ("millis", "Serial", "micros", "delay", "yield", "delayMicroseconds")
+        calls = ("millis", "Serial", "micros", "delay", "yield", "delayMicroseconds",
+                 "millis", "Serial", "micros", "delay", "yield", "delayMicroseconds",
+                 "millis", "Serial", "micros")
+        self.assertEqual(len(sources), len(calls))
         for source, call in zip(sources, calls):
             with self.subTest(call=call):
                 code = strip_non_code(source)
@@ -68,6 +90,30 @@ class ContractToolTests(unittest.TestCase):
                     with patch.object(timing, "ROOT", root), redirect_stdout(output):
                         self.assertEqual(timing.main(), 1)
                     self.assertIn(call, output.getvalue())
+
+    def test_continued_line_comments_cannot_hide_following_code(self) -> None:
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                source = f'// note \\{newline}"{newline}Serial.println(1);{newline}const char* s = "x";{newline}'
+                code = strip_non_code(source)
+                self.assertIn("Serial", code)
+                self.assertEqual(len(source), len(code))
+                self.assertEqual(source.index("Serial"), code.index("Serial"))
+                self.assertEqual(source.count("\n"), code.count("\n"))
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = pathlib.Path(tmp)
+                    (root / "src").mkdir()
+                    (root / "src/fault.cpp").write_text(source, encoding="utf-8", newline="")
+                    with patch.object(timing, "ROOT", root), redirect_stdout(io.StringIO()) as output:
+                        self.assertEqual(timing.main(), 1)
+                    self.assertIn("Serial", output.getvalue())
+                # Continued comment contents must stay hidden, even across two
+                # splices; only the call after the comment terminator is code.
+                comment = f'// note \\{newline}Serial \\{newline}millis(){newline}micros();'
+                code = strip_non_code(comment)
+                self.assertNotIn("Serial", code)
+                self.assertNotIn("millis", code)
+                self.assertIn("micros", code)
 
     def test_documented_framework_names_and_split_tokens_are_ignored(self) -> None:
         code = strip_non_code('/* Serial millis() */ "micros()"; R"(Wire // delay())";')

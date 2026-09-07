@@ -61,6 +61,19 @@ constexpr esp_err_t ESP_ERR_INVALID_STATE = 0x103;
 constexpr esp_err_t ESP_ERR_NOT_FOUND = 0x105;
 constexpr esp_err_t ESP_ERR_INVALID_RESPONSE = 0x108;
 
+MCP45HVX1::Config gCfg;
+struct PresetDevice {
+  std::vector<uint8_t> writes;
+  MCP45HVX1::Status writeWiper(uint8_t value) {
+    writes.push_back(value);
+    return MCP45HVX1::Status::Ok();
+  }
+} gDev;
+unsigned presetReadbacks = 0;
+void printWarning(const char*) {}
+void printStatus(const char*, const MCP45HVX1::Status& status) { assert(status.ok()); }
+void readWiperCommand(const char*) { ++presetReadbacks; }
+
 #define fgets fakeFgets
 #define clearerr fakeClearerr
 #define printf fakePrintf
@@ -192,11 +205,31 @@ void testI2cMapping() {
   assert(mapI2c(ESP_ERR_INVALID_STATE, "test").code == Err::I2C_BUS);
   assert(mapI2c(ESP_ERR_NOT_FOUND, "test").code == Err::I2C_BUS);
 }
+
+void testPresetWrites() {
+  for (const auto resolution : {MCP45HVX1::Resolution::Bits8, MCP45HVX1::Resolution::Bits7}) {
+    gCfg.resolution = resolution;
+    gDev.writes.clear();
+    presetReadbacks = 0;
+    for (const char* command : {"zero", "mid", "max"}) {
+      dispatchPreset(command, "junk");
+    }
+    assert(gDev.writes.empty() && presetReadbacks == 0);
+    for (const char* command : {"zero", "mid", "max"}) {
+      dispatchPreset(command, "");
+    }
+    const std::vector<uint8_t> expected = resolution == MCP45HVX1::Resolution::Bits8
+        ? std::vector<uint8_t>{0x00, 0x7F, 0xFF}
+        : std::vector<uint8_t>{0x00, 0x3F, 0x7F};
+    assert(gDev.writes == expected && presetReadbacks == 3);
+  }
+}
 }  // namespace
 
 int main() {
   testInput();
   testParsers();
   testI2cMapping();
-  std::puts("PASS: IDF console input, parsers, and conservative transport mapping");
+  testPresetWrites();
+  std::puts("PASS: IDF console input, parsers, conservative transport mapping, and both-variant preset writes");
 }

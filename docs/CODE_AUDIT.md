@@ -5,6 +5,9 @@
 > that earlier investigation. The completed verification, corrections to this
 > report, implemented fixes, and remaining hardware evidence requirements are
 > in [`CODE_AUDIT_RESOLUTION.md`](CODE_AUDIT_RESOLUTION.md).
+> A later check of all 17 dispositions and seven follow-up claims is recorded
+> in [`CODE_AUDIT_REVERIFICATION.md`](CODE_AUDIT_REVERIFICATION.md), including
+> reproduced defects in that resolution. Proposals below remain historical.
 
 Findings from a full review of the library against DS20005304B (Rev B) and
 DS80000649B (Rev B, 7/2015), plus the examples, tests, and repository tooling.

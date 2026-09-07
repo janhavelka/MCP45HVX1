@@ -89,8 +89,7 @@ def main() -> int:
         errors.append(f"framework include forbidden in core file {rel}: observed={count}")
 
     for rel, count in observed_wire_includes.items():
-        if count != 0:
-            errors.append(f"Wire include forbidden in core file {rel}: observed={count}")
+        errors.append(f"Wire include forbidden in core file {rel}: observed={count}")
 
     for rel, counts in observed_tokens.items():
         errors.append(f"framework tokens forbidden in core file {rel}: {counts}")

@@ -22,6 +22,9 @@ namespace {
 
 using Driver = ::MCP45HVX1::MCP45HVX1;
 
+static_assert(static_cast<uint8_t>(Err::OFFLINE) == 15,
+              "Err::OFFLINE must retain its append-only numeric value");
+
 static_assert(!std::is_copy_constructible<Driver>::value,
               "MCP45HVX1 must not be copy constructible");
 static_assert(!std::is_copy_assignable<Driver>::value,
@@ -2376,7 +2379,9 @@ void test_zero_step_job_does_not_publish_a_stale_snapshot() {
 
   // A zero-step job is a no-op, but it must describe itself rather than leave
   // the previous job's completed readback visible.
+  const uint32_t callsBefore = bus.readCalls + bus.writeCalls;
   TEST_ASSERT_TRUE(dev.startIncrementWiperJob(0).ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 1).ok());
   JobSnapshot snap = dev.getJobSnapshot();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::IncrementWiper),
                           static_cast<uint8_t>(snap.type));
@@ -2386,10 +2391,12 @@ void test_zero_step_job_does_not_publish_a_stale_snapshot() {
   TEST_ASSERT_EQUAL_UINT8(0u, snap.instructionsCompleted);
 
   TEST_ASSERT_TRUE(dev.startDecrementWiperJob(0).ok());
+  TEST_ASSERT_TRUE(dev.pollJob(0, 1).ok());
   snap = dev.getJobSnapshot();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(JobType::DecrementWiper),
                           static_cast<uint8_t>(snap.type));
   TEST_ASSERT_FALSE(snap.registersValid);
+  TEST_ASSERT_EQUAL_UINT32(callsBefore, bus.readCalls + bus.writeCalls);
 }
 
 void test_general_call_disabled_reports_unsupported_even_when_offline() {

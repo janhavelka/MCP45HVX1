@@ -1,5 +1,8 @@
 # Code Audit Verification And Resolution
 
+The follow-up [audit verification](CODE_AUDIT_REVERIFICATION.md) records the
+2026-09-06 reproductions and corrections against commit `e59b267`.
+
 Reviewed on 2026-09-05 against synchronized `main` at `1faad98`
 (`1faad9898e5fd50c62fdcd335b1894731b980124`). The working tree was clean and
 `git pull --ff-only` confirmed it was current. This report supersedes the
@@ -96,8 +99,9 @@ An out-of-range result means no feasible code; clamping it would hide that.
 [`DEVICE_REFERENCE.md`](DEVICE_REFERENCE.md) now records these distinctions,
 the A-W upper-bound difference, and the separate current/thermal/measurement
 requirements. A byte-returning `minSafeWiperCode()` cannot express invalid or
-infeasible inputs, violates the repository's fallible-operation convention,
-and has no present caller with measured voltage. Documentation is the simpler
+infeasible inputs and has no present caller with measured voltage. Existing
+pure math helpers return plain values; that convention alone does not reject
+a new helper. Documentation is the simpler
 proper solution here.
 
 ### CLI and tooling scope
@@ -110,7 +114,9 @@ Arduino token overflow is rejected rather than silently accepting a prefix;
 malformed `begin` commands cannot trigger a restart or partially change config.
 The additional `mid` discrepancy is fixed: both examples select the POR
 midpoint (`0x7F`/`0x3F`) instead of Arduino rounding the fractional midpoint
-one code higher. Host tests cover both variants.
+one code higher. ESP-IDF already used these values. The original host tests
+asserted the Arduino writes in both variants; the follow-up adds assertions
+for the actual ESP-IDF preset branch too.
 
 The examples continue to share a command contract, as `AGENTS.md` requires.
 Host tests compile the real Arduino CLI and extracted native-IDF functions;
@@ -118,8 +124,12 @@ they exercise input/restore failures without pretending to be hardware tests.
 Contract mutation tests supplement these behavioral checks.
 
 Simply stripping strings before comments is also insufficient: quote marks
-inside comments can hide following code. The shared lexer recognizes comments
-and ordinary/raw literals in one pass while preserving line breaks. The
+inside comments can hide following code. The original shared lexer handled
+ordinary/raw literals and uncontinued comments in one pass, but missed a
+backslash-newline continuation of a line comment. The follow-up consumes
+backslash-LF and backslash-CRLF inside line comments while preserving source
+offsets and line breaks for function extraction. This is a source guard,
+not a complete C++ preprocessor. The
 strict Doxygen gate is limited to the public API; example documentation does
 not need dozens of unrelated comment edits to enable a useful API check.
 The original warning counts were reproduced with Doxygen 1.15.0: zero for
@@ -138,6 +148,9 @@ production-readiness claim.
 - Remove `addr_alt` automation; both CLIs and HIL accept only the device range.
 - Handle `Err::OFFLINE` with explicit recovery; `BUSY` denotes an active job.
 - Treat polling without a started job as `INVALID_PARAM`.
+- Update Arduino `mid` assertions from `0x80` to `0x7F` (8-bit), or from
+  `0x40` to `0x3F` (7-bit). ESP-IDF already wrote the POR midpoint.
+  `frac 0.5` retains its rounded fractional semantics in both examples.
 - Expect generic I2C errors where a framework cannot prove the failed phase.
   Rebuild dependent code; the removed fields change structure layout.
 

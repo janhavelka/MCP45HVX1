@@ -158,12 +158,22 @@ Inject faults using safe loads and record raw logs:
 
 | Fault | Expected behavior | Result |
 |---|---|---|
-| Address NACK during `begin()`/`probe()` | `DEVICE_NOT_FOUND`, detail preserved | Pending |
+| Address NACK during `begin()`/`probe()`, bundled CLIs | `I2C_ERROR`; preserve ESP-IDF native response or Wire returned byte count | Pending |
+| Address NACK during `begin()`/`probe()`, transport that proves the address phase failed | `DEVICE_NOT_FOUND`, transport detail preserved | Pending |
 | Data NACK after write attempt | Original status preserved; affected cache unknown if mutation possible | Pending |
 | Timeout after write attempt | Original status preserved; hardware uncertainty set | Pending |
 | Bus error after write attempt | Original status preserved; hardware uncertainty set | Pending |
 | Device unplug/replug | OFFLINE/DEGRADED behavior and `recover()` path logged | Pending |
 | Bus reset callback OK | Does not claim READY until a tracked read or `recover()` succeeds | Pending |
+
+Record the injected electrical fault separately from its software status.
+ESP-IDF 6.0.1 can report NACKs and internal transaction timeouts with the same
+`ESP_ERR_INVALID_RESPONSE`; Wire reads expose only a byte count. Neither
+bundled adapter produces `I2C_NACK_ADDR`. A data NACK or timeout may therefore
+appear as `I2C_ERROR`; require the original adapter status/detail and the
+uncertainty behavior above, not a phase-specific code the framework cannot
+provide. An explicit framework timeout remains `I2C_TIMEOUT`. See the
+[transport contract](MCP45HVX1_API_CONTRACT.md).
 
 ## Output-Changing Checks
 

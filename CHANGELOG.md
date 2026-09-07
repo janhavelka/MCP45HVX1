@@ -22,10 +22,16 @@ verification and disposition of all 17 audit findings.
   input, transient errors, CR/LF/CRLF, oversized lines, and disconnects.
 - Both CLIs reject malformed no-argument commands and overflowing tokens and
   agree on terminal-mode aliases; invalid `begin` arguments cannot change config.
-  `mid` now selects the POR midpoint in both examples and both resolutions.
+  Arduino `mid` now selects the POR midpoint, matching the existing ESP-IDF
+  behavior; see the migration note below for the changed output codes.
 - The Arduino bus-reset callback reports a failed bus reinitialization.
-- Contract guards propagate failures and correctly distinguish C++ comments
-  and literals. HIL detailed help no longer triggers a false `Usage:` failure.
+- Contract guards propagate failures and distinguish C++ comments and literals,
+  including continued line comments that previously hid real framework calls.
+  HIL detailed help no longer triggers a false `Usage:` failure.
+- The strict public-API Doxygen configuration explicitly treats warnings as
+  errors even if the full manual's warning policy is relaxed.
+- HIL fault expectations account for the bundled adapters' ambiguous NACK and
+  timeout reports; a definite address-NACK test requires a capable transport.
 - Version-script imports are read-only; only CLI sync or SCons performs writes.
 - The device reference corrects Table 5-3 rounding and current units instead
   of adding the audit's unsafe `minSafeWiperCode()` proposal.
@@ -82,6 +88,9 @@ verification and disposition of all 17 audit findings.
 
 ### Added
 
+- Regression assertions cover `Err::OFFLINE == 15`, polling completed zero-step
+  jobs, both ESP-IDF preset resolutions, and 15 comment/literal adversarial
+  inputs plus LF/CRLF line-comment continuations.
 - `Err::OFFLINE` (appended as value 15) distinguishes a recovery-required latch
   from `BUSY`, which now denotes an active job.
 - Ten native regression groups expand the core suite to 88 cases, plus host
@@ -151,6 +160,18 @@ verification and disposition of all 17 audit findings.
   7-bit addresses are `0x2E-0x2F`. It also restores the second sentence of
   DS20005304B Table 6-2 Note 1, which states that the disjoint fixed bits exist
   so both families can share one bus.
+
+### Migration to 2.0.0
+
+- Arduino `mid` now writes `0x7F` instead of `0x80` in 8-bit mode, and
+  `0x3F` instead of `0x40` in 7-bit mode. Update output-code assertions in HIL
+  scripts. ESP-IDF already used these POR midpoint codes. `frac 0.5` retains
+  fractional rounding (`0x80` / `0x40`) in both CLIs. This is an output change,
+  recorded under Fixed above and called out here for migrating operators.
+- The removed alternate-address fields and command below require source
+  changes. Handle `OFFLINE` separately from job `BUSY`, and expect
+  `INVALID_PARAM` when polling without a started job. See the full
+  [migration notes](docs/CODE_AUDIT_RESOLUTION.md).
 
 ### Removed
 

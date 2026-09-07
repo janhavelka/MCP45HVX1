@@ -19,6 +19,7 @@ evidence-gated.
 | [`IDF_PORT.md`](IDF_PORT.md) | ESP-IDF component/example boundary, command parity, and build evidence rules. |
 | [`CODE_AUDIT.md`](CODE_AUDIT.md) | Historical audit input; its statuses are superseded by the resolution report. Maintainer document; excluded from package exports. |
 | [`CODE_AUDIT_RESOLUTION.md`](CODE_AUDIT_RESOLUTION.md) | Verification of all 17 findings, implemented fixes, rejected proposals, migration, and validation evidence. Maintainer document; excluded from package exports. |
+| [`CODE_AUDIT_REVERIFICATION.md`](CODE_AUDIT_REVERIFICATION.md) | Re-verification of the seven follow-up claims and the audit-resolution dispositions, with corrections and validation evidence. Maintainer document; excluded from package exports. |
 
 Repository-wide user and release information lives in
 [`../README.md`](../README.md), [`../CHANGELOG.md`](../CHANGELOG.md), and

@@ -653,15 +653,15 @@ bool parseTerminalMode(const char* text, MCP45HVX1::TerminalMode* out) {
 }
 
 bool parseTerminal(const char* text, MCP45HVX1::Terminal* out) {
-  if (strcmp(text, "a") == 0 || strcmp(text, "A") == 0) {
+  if (strcmp(text, "a") == 0) {
     *out = MCP45HVX1::Terminal::A;
     return true;
   }
-  if (strcmp(text, "w") == 0 || strcmp(text, "W") == 0) {
+  if (strcmp(text, "w") == 0) {
     *out = MCP45HVX1::Terminal::W;
     return true;
   }
-  if (strcmp(text, "b") == 0 || strcmp(text, "B") == 0) {
+  if (strcmp(text, "b") == 0) {
     *out = MCP45HVX1::Terminal::B;
     return true;
   }

@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 
 # Match each comment/literal in one pass so delimiters inside a string, or
-# quotes inside a comment, cannot consume real code later in the file.
+# quotes inside a comment, cannot consume real code later in the file. Consume
+# backslash-LF/CRLF continuations inside // comments without changing offsets.
 NON_CODE_RE = re.compile(
-    r'//[^\n]*|/\*.*?\*/|'
+    r'//(?:\\\r?\n|[^\n])*|/\*.*?\*/|'
     r'(?:u8|u|U|L)?R"(?P<delimiter>[^\s()\\]{0,16})\(.*?\)(?P=delimiter)"|'
     r'"(?:\\.|[^"\\])*"|(?<![\w\'])(?:u8|u|U|L)?\'(?:\\.|[^\'\\])*\'',
     re.DOTALL,
@@ -183,8 +184,6 @@ def command_help_names(specs: list[dict[str, str]]) -> set[str]:
     names: set[str] = set()
     for spec in specs:
         for name in (spec["canonical"], *spec["aliases"].split()):
-            if not name:
-                continue
             if name in names:
                 fail(f"duplicate detailed-help command/alias '{name}'")
             names.add(name)

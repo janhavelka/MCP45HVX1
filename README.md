@@ -135,8 +135,10 @@ in the headers and in the generated Doxygen output.
 fails ambiguously (timeout, bus error, data NACK), the driver cannot know
 whether the device applied it. It returns the original error, marks the
 affected cache unknown, and sets `hardwareStateUncertain()`. Only a successful
-readback clears it — `resetI2cState()` does not. Address NACK and validation
-failures that happen before any bus access do not set it.
+readback clears it — `resetI2cState()` does not. A definite address NACK or a
+validation failure before bus access does not set it. The bundled adapters
+cannot prove an address NACK from an ambiguous framework result; they preserve
+uncertainty as described in the [transport contract](docs/MCP45HVX1_API_CONTRACT.md).
 
 **Offline latch.** After `Config::offlineThreshold` consecutive tracked
 failures the driver latches OFFLINE and refuses bus-touching calls until
@@ -201,6 +203,18 @@ for a single entry with its aliases, safety classification, syntax, and
 examples. Alias lookup resolves to the canonical command, so `help health`,
 `help rreg`, and `? terminal` show the `drv`, `reg`, and `term` entries.
 Help lookup never performs the selected operation.
+
+Both CLIs accept the following spellings for `mode`; the help synopsis lists
+the canonical names. Calling `mode` without an argument reads the current
+mode; supplying a name applies that preset and can change the analog output.
+
+| Canonical mode | Accepted aliases |
+|---|---|
+| `pot` | `potentiometer` |
+| `bw` | `b-w`, `rheostat-bw`, `rheostat_bw` |
+| `aw` | `a-w`, `rheostat-aw`, `rheostat_aw` |
+| `float` | `wiper-floating`, `floating` |
+| `shutdown` | None |
 
 ```text
 === Register Snapshot ===
