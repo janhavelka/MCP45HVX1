@@ -56,6 +56,13 @@ execute. A partial line or disconnected host does not hold the task inside a
 blocking line read. Physical console behavior still requires an ESP-IDF HIL
 session; build and host tests alone do not establish it.
 
+`initConsole()` has no recorded runtime validation, and no recorded HIL run
+has driven this native CLI. CI compiles the example. The host tests in
+`tests/test_idf_console.cpp` exercise the extracted `pollConsole()` input
+logic, but do not execute driver installation or VFS line-ending setup.
+UART, USB Serial/JTAG, and USB CDC console initialization remain runtime
+validation tasks.
+
 The adapter retains ESP-IDF error detail. Version 6.0.1 reports both address
 and data NACKs as `ESP_ERR_INVALID_RESPONSE`, and can return that same code
 after an internal transaction timeout. It therefore maps to `I2C_ERROR` even

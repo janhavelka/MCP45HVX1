@@ -3,9 +3,9 @@
 ## Unreleased
 
 Development metadata is now **2.0.0** for the source-incompatible removals
-below. No release or hardware qualification is implied. See
-[`docs/CODE_AUDIT_RESOLUTION.md`](docs/CODE_AUDIT_RESOLUTION.md) for the
-verification and disposition of all 17 audit findings.
+below. No release or hardware qualification is implied. Migration steps are
+listed below; the maintained [API contract](docs/MCP45HVX1_API_CONTRACT.md)
+describes the current behavior.
 
 ### Fixed
 
@@ -33,8 +33,7 @@ verification and disposition of all 17 audit findings.
 - HIL fault expectations account for the bundled adapters' ambiguous NACK and
   timeout reports; a definite address-NACK test requires a capable transport.
 - Version-script imports are read-only; only CLI sync or SCons performs writes.
-- The device reference corrects Table 5-3 rounding and current units instead
-  of adding the audit's unsafe `minSafeWiperCode()` proposal.
+- The device reference corrects Table 5-3 rounding and current units.
 - `restorePowerOnDefaults()` now writes Wiper 0 before TCON0. The default TCON
   reconnects every terminal, so the previous order briefly connected the analog
   terminals while Wiper 0 still held the old code.
@@ -49,8 +48,7 @@ verification and disposition of all 17 audit findings.
   repeated the `uncertain=` value instead of reporting the CLI's own
   output-changed flag, so the two columns were always identical.
 - Arduino example transport retains repeated-start reads. A zero-byte read
-  reports `I2C_ERROR`, because `requestFrom()` loses the backend error detail;
-  the earlier audit's address-NACK interpretation was incorrect.
+  reports `I2C_ERROR`, because `requestFrom()` loses the backend error detail.
 - Arduino example transport: a short `Wire.write()` no longer returns with the
   transmission still open. `TwoWire::beginTransmission()` acquires the Wire
   mutex with `portMAX_DELAY` and only `endTransmission(true)` releases it, so
@@ -67,20 +65,18 @@ verification and disposition of all 17 audit findings.
 - `scripts/generate_version.py` no longer crashes with an unhandled
   `RuntimeError` when `idf_component.yml` has an unquoted `version:`. The
   regex now accepts either quoting form, so `generate_version.py check`
-  reports "Out of date" instead of raising a traceback in CI. The rewrite
-  mechanism originally blamed for producing that form does not reach this
-  repository's manifest — see finding 17 in `docs/CODE_AUDIT.md` — and if a
-  manifest is ever reformatted, canonical form is restored with
+  reports "Out of date" instead of raising a traceback in CI. The
+  pioarduino component manager selects the Arduino framework's own manifest
+  before checking `project_src_dir`; it does not rewrite this repository's
+  manifest. If the manifest is ever reformatted, canonical form is restored with
   `git checkout -- idf_component.yml`, not by running the generator.
 - CI uploads build logs with `actions/upload-artifact@v7` (Node 24). The
   previous `@v4` pin was the last Node 20 official action in the workflow, and
   `tools/check_idf_example_contract.py` pinned that exact major, which blocked
   the update; the check is now version-agnostic.
-- The documentation CI job was failing. `docs/CODE_AUDIT.md` was not in the
-  Doxyfile's `INPUT` list, so a cross-reference to it from
-  `docs/DEVICE_REFERENCE.md` could not resolve, and
-  `WARN_AS_ERROR = FAIL_ON_WARNINGS` turns an unresolved `\ref` into a hard
-  error. `doxygen Doxyfile` now emits zero diagnostics.
+- Doxygen scans maintained documentation recursively so newly added pages
+  resolve in cross-references. Unresolved references fail the documentation
+  CI job through `WARN_AS_ERROR = FAIL_ON_WARNINGS`.
 - `scripts/generate_version.py`'s tolerant `version:` regex ended in `\s*$`,
   which under `re.MULTILINE` consumes the trailing newline when `version:` is
   the last line of `idf_component.yml` — exactly where a `yaml.dump` rewrite
@@ -135,21 +131,6 @@ verification and disposition of all 17 audit findings.
 - The HIL runner no longer emits "parent validation notes" / "final response"
   into generated operator reports, and `scripts/pio.cmd` no longer prints
   agent-directed instructions to a human.
-- The audit document moved to `docs/CODE_AUDIT.md` and every finding in it was
-  independently re-verified against the working tree, one investigation per
-  finding, by running the code rather than re-reading the first pass. Findings
-  6, 16, and 17 had their central claim refuted, findings 9 and 11 had
-  load-bearing numbers or a formula corrected, and one "verified correct" bullet
-  cited a regression test that does not exist. Each finding now carries an
-  Open/Fixed status so an implementer can tell proposals from work already done.
-- Finding 17 (an ESP32 build rewriting `idf_component.yml`) is closed as not
-  reproducible: the pioarduino component manager checks the Arduino framework
-  directory first and rewrites the framework's own manifest, never reaching
-  `project_src_dir`. The proposed `src_dir` restructuring is not needed.
-- `docs/CODE_AUDIT.md` is excluded from both package exports. It is a
-  maintainer work-item document, so it is treated like `AGENTS.md`,
-  `CODEOWNERS`, and `Doxyfile` rather than shipped into consumers' trees by the
-  `docs/*.md` include rule.
 - `README.md`, `docs/MCP45HVX1_API_CONTRACT.md`, and
   `docs/MCP45HVX1_HARDWARE_VALIDATION.md` now agree with
   `docs/DEVICE_REFERENCE.md` that `0x5C-0x5F` is not an MCP45HVX1 address
@@ -168,13 +149,20 @@ verification and disposition of all 17 audit findings.
   scripts. ESP-IDF already used these POR midpoint codes. `frac 0.5` retains
   fractional rounding (`0x80` / `0x40`) in both CLIs. This is an output change,
   recorded under Fixed above and called out here for migrating operators.
-- The removed alternate-address fields and command below require source
-  changes. Handle `OFFLINE` separately from job `BUSY`, and expect
-  `INVALID_PARAM` when polling without a started job. See the full
-  [migration notes](docs/CODE_AUDIT_RESOLUTION.md).
+- Remove uses of `Config::allowAlternateAddressRange`,
+  `DeviceInfo::usingAlternateAddressRange`, `cmd::ALT_MIN_ADDRESS`, and
+  `cmd::ALT_MAX_ADDRESS`, plus `addr_alt` automation. Use the hardware-strapped
+  `0x3C..0x3F` address and rebuild dependent code because structure layouts changed.
+- Handle `Err::OFFLINE` with explicit recovery; `BUSY` denotes an active job.
+  Expect `INVALID_PARAM` when polling without a started job.
+- Expect generic I2C errors where the framework cannot prove the failed
+  transaction phase; see the [transport contract](docs/MCP45HVX1_API_CONTRACT.md).
 
 ### Removed
 
+- Completed audit and resolution reports, their documentation index entries,
+  and obsolete package exclusions. Migration guidance and open validation
+  requirements remain in the maintained changelog and ESP-IDF guide.
 - The unsupported alternate-address API: `allowAlternateAddressRange`,
   `usingAlternateAddressRange`, `ALT_MIN_ADDRESS`, `ALT_MAX_ADDRESS`, and the
   `addr_alt` CLI command. Only `0x3C..0x3F` is accepted; rebuild dependent code
