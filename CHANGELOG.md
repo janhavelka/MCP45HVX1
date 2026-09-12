@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-Development metadata is now **2.0.0** for the source-incompatible removals
-below. No release or hardware qualification is implied. Migration steps are
-listed below; the maintained [API contract](docs/MCP45HVX1_API_CONTRACT.md)
-describes the current behavior.
+Latest published release: **v1.1.0**. The changes below are **Unreleased**.
+The next intended release is **2.0.0** because it removes public API fields.
+No release or hardware qualification is implied. Migration steps are listed
+below; the maintained [API contract](docs/MCP45HVX1_API_CONTRACT.md) describes
+the current behavior.
 
 ### Fixed
 
@@ -142,7 +143,7 @@ describes the current behavior.
   DS20005304B Table 6-2 Note 1, which states that the disjoint fixed bits exist
   so both families can share one bus.
 
-### Migration to 2.0.0
+### Migration from 1.1.0 to Unreleased
 
 - Arduino `mid` now writes `0x7F` instead of `0x80` in 8-bit mode, and
   `0x3F` instead of `0x40` in 7-bit mode. Update output-code assertions in HIL

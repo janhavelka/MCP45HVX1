@@ -16,6 +16,11 @@ part of the library API.
 > override, and General Call safety on a shared bus all require hardware
 > evidence — see [Hardware Validation](docs/MCP45HVX1_HARDWARE_VALIDATION.md).
 
+The latest published release is **v1.1.0**. This checkout also contains
+**Unreleased** changes; see the [migration notes](CHANGELOG.md#unreleased)
+before using its API. The next intended release is **2.0.0** because of the
+public API removals.
+
 ## Features
 
 - **Injected I2C transport** — no `Wire` or ESP-IDF dependency in library code

@@ -283,8 +283,9 @@ change the analog output and reject trailing arguments.
 | 8-bit / MCP45HV51 | `0x00` | `0x7F` | `0xFF` |
 | 7-bit / MCP45HV31 | `0x00` | `0x3F` | `0x7F` |
 
-For 2.0.0, Arduino `mid` changed from `0x80` to `0x7F` (8-bit) and from
-`0x40` to `0x3F` (7-bit), matching the pre-existing ESP-IDF behavior. Update
+In Unreleased development after v1.1.0, Arduino `mid` changed from `0x80` to
+`0x7F` (8-bit) and from `0x40` to `0x3F` (7-bit), matching the pre-existing
+ESP-IDF behavior. Update
 scripts that assert the old Arduino codes. `frac 0.5` still uses fractional
 rounding and writes `0x80` / `0x40`; use it when that is the intended code.
 Readback establishes register contents; SHDN/WLAT and external circuitry can
