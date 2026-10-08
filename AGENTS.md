@@ -1,5 +1,7 @@
 # MCP45HVX1 Repository Notes
 
+Always synchronize Git with the intended upstream branch before starting work by fetching and fast-forwarding safely, preserving existing local changes and reporting any divergence, conflict, or synchronization failure.
+
 Working notes for anyone — human or agent — changing this repository.
 
 ## Build And Check
