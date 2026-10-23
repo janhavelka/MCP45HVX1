@@ -275,6 +275,7 @@ the install artifact focused.
 ## Documentation
 
 - <a href="docs/README.md">Docs index</a>
+- [Retained branch review](docs/RETAINED_BRANCH_AUDIT.md) - audit/port disposition and remaining qualification work
 - [Device Reference](docs/DEVICE_REFERENCE.md) — device facts and driver assumptions
 - [API Contract](docs/MCP45HVX1_API_CONTRACT.md) — behavioral contract
 - [Hardware Validation](docs/MCP45HVX1_HARDWARE_VALIDATION.md) — HIL and evidence gates
