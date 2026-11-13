@@ -33,7 +33,7 @@
     "url": "https://github.com/janhavelka/MCP45HVX1.git"
   },
   "license": "MIT",
-  "homepage": "https://www.thymos.cz",
+  "homepage": "https://github.com/janhavelka/MCP45HVX1",
   "frameworks": [
     "arduino",
     "espidf"
