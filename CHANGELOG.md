@@ -107,6 +107,8 @@ the current behavior.
 
 ### Changed
 
+- Unified author, copyright and contact metadata: THYMOS Solution s.r.o.,
+  Jan Havelka, info@thymos.cz.
 - Failure accounting has one owner; local callback errors leave device health
   unchanged. The documented 64-byte command bound remains sufficient for both
   supplied transports.
