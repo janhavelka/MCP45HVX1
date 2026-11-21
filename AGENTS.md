@@ -95,3 +95,9 @@ guard. On Windows it selects the PlatformIO installation through
   limits. Documentation and HIL must require external measurement.
 - Do not claim hardware validation, analog accuracy, General Call safety, or
   production readiness without logged evidence.
+
+## Commit and pull request attribution
+
+Credit human contributors for their work. Omit AI co-author trailers, AI-generated
+signatures or sign-offs, generated-by footers, session links, and other AI
+attribution from commit messages and pull request titles and descriptions.
